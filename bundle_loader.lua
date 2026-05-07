@@ -1,6 +1,6 @@
 local M = {}
 
--- Loads external Lua bundles from lua\pasthetic\bundles first, with optional patch hooks.
+-- Loads external Lua bundles from pasthetic\bundles first, with optional patch hooks.
 -- This module only reads/compiles/runs a bundle requested by the entrypoint.
 
 function M.load(deps, label, paths)
@@ -19,7 +19,7 @@ function M.load(deps, label, paths)
 
         return false
     end
-    local bundled_path = 'lua\\pasthetic\\bundles\\' .. label
+    local bundled_path = 'pasthetic\\bundles\\' .. label
     local search_paths = { bundled_path }
 
     for i = 1, #paths do
