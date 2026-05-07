@@ -43,18 +43,12 @@ local config do
     local last_skin_config_name = localdb['last_skin_config_name']
     local pending_skin_cache = nil
     local skin_import_suspended = false
-    local gamesense_default_config = localdb['gamesense_default_config']
-
     if type(skin_config_data) ~= 'table' then
         skin_config_data = { }
     end
 
     if type(last_skin_config_name) ~= 'string' or last_skin_config_name == '' then
         last_skin_config_name = nil
-    end
-
-    if type(gamesense_default_config) ~= 'string' or gamesense_default_config == '' then
-        gamesense_default_config = nil
     end
 
     local config_defaults = { }
@@ -193,40 +187,6 @@ local config do
         localdb['last_skin_config_name'] = last_skin_config_name
     end
 
-    local function save_gamesense_default_config()
-        localdb['gamesense_default_config'] = gamesense_default_config
-    end
-
-    local function load_gamesense_config(name)
-        name = utils.trim(name or '')
-
-        if name == '' then
-            return false
-        end
-
-        local api = rawget(_G, 'config')
-
-        if type(api) ~= 'table' or type(api.load) ~= 'function' then
-            logging.error('GameSense config API is unavailable')
-            return false
-        end
-
-        local ok, result = pcall(api.load, name)
-
-        if not ok then
-            logging.error(string.format(
-                'failed to load %s GameSense config: %s', name, result
-            ))
-
-            return false
-        end
-
-        logging.success(string.format(
-            'loaded %s GameSense config', name
-        ))
-
-        return true
-    end
 
     local function find_skin_config(name)
         for i = 1, #skin_config_data do
@@ -297,10 +257,6 @@ local config do
 
     function ref.has_pending_skin_cache()
         return pending_skin_cache ~= nil
-    end
-
-    function ref.has_gamesense_default()
-        return gamesense_default_config ~= nil
     end
 
     local function read_current_skin_config()
@@ -891,41 +847,6 @@ local config do
             set_default_config(list.name, false)
         end
 
-        local function on_gamesense_mark_default()
-            local name = nil
-
-            if ref.get_selected_gamesense_config_name ~= nil then
-                name = ref.get_selected_gamesense_config_name()
-            end
-
-            if name == nil then
-                logging.error('select GameSense config')
-                return
-            end
-
-            gamesense_default_config = name
-            save_gamesense_default_config()
-            menu_logic.update()
-
-            logging.success(string.format(
-                'marked %s GameSense default config', name
-            ))
-        end
-
-        local function on_gamesense_remove_default()
-            local name = gamesense_default_config
-
-            gamesense_default_config = nil
-            save_gamesense_default_config()
-            menu_logic.update()
-
-            if name ~= nil then
-                logging.success(string.format(
-                    'removed %s GameSense default config', name
-                ))
-            end
-        end
-
         local function on_skin_list()
             sync_skin_input_with_selected_config()
         end
@@ -1280,8 +1201,6 @@ local config do
         ref.restore_button:set_callback(on_restore)
         ref.mark_default_button:set_callback(on_mark_default)
         ref.unmark_default_button:set_callback(on_unmark_default)
-        ref.gamesense_mark_default_button:set_callback(on_gamesense_mark_default)
-        ref.gamesense_remove_default_button:set_callback(on_gamesense_remove_default)
         ref.skin_list:set_callback(on_skin_list)
         ref.skin_load_button:set_callback(on_skin_load)
         ref.skin_create_button:set_callback(on_skin_create)
@@ -1329,10 +1248,6 @@ local config do
     local default_config = get_selected_config()
 
     logging.script_loaded()
-
-    if gamesense_default_config ~= nil then
-        load_gamesense_config(gamesense_default_config)
-    end
 
     if default_config ~= nil and default_config.is_default then
         load_config(default_config.name, nil)

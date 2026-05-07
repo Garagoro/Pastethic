@@ -2110,46 +2110,6 @@ local resource do
 
 
     local config = { } do
-        config.gamesense_mark_default_button = wrap_external_config_ref(
-            ui.new_button('CONFIG', 'Lua', 'Mark GS as default', function() end)
-        )
-
-        config.gamesense_remove_default_button = wrap_external_config_ref(
-            ui.new_button('CONFIG', 'Lua', 'Remove GS default', function() end)
-        )
-
-        local gamesense_config_name_ref = nil do
-            local ok, ref = pcall(ui.reference, 'CONFIG', 'Presets', 'Presets')
-
-            if ok and ref ~= nil then
-                local value_ok, value = pcall(ui.get, ref)
-
-                if value_ok and type(value) == 'string' then
-                    gamesense_config_name_ref = ref
-                end
-            end
-        end
-
-        function config.get_selected_gamesense_config_name()
-            if gamesense_config_name_ref == nil then
-                return nil
-            end
-
-            local ok, value = pcall(ui.get, gamesense_config_name_ref)
-
-            if not ok or type(value) ~= 'string' then
-                return nil
-            end
-
-            value = utils.trim(value)
-
-            if value == '' then
-                return nil
-            end
-
-            return value
-        end
-
         config.categories = new_selector_item(
             'AA', 'Anti-aimbot angles', '\n config.categories', {
                 {
