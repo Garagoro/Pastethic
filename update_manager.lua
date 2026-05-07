@@ -3,11 +3,11 @@ local M = {}
 local MANIFEST_PATH = 'lua\\pasthetic\\manifest.json'
 local LOCAL_ROOT = 'lua\\pasthetic\\'
 local MANIFEST_URLS = {
-    'https://raw.githubusercontent.com/Garagoro/Pastethic/main/manifest.json',
+    'https://raw.githubusercontent.com/Garagoro/Pastethic/refs/heads/main/manifest.json',
     'https://cdn.jsdelivr.net/gh/Garagoro/Pastethic@main/manifest.json'
 }
 local DEFAULT_BASE_URLS = {
-    'https://raw.githubusercontent.com/Garagoro/Pastethic/main/',
+    'https://raw.githubusercontent.com/Garagoro/Pastethic/refs/heads/main/',
     'https://cdn.jsdelivr.net/gh/Garagoro/Pastethic@main/'
 }
 
