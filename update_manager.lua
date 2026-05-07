@@ -6,6 +6,10 @@ local MANIFEST_URLS = {
     'https://raw.githubusercontent.com/Garagoro/Pastethic/refs/heads/main/manifest.json',
     'https://cdn.jsdelivr.net/gh/Garagoro/Pastethic@main/manifest.json'
 }
+local UPDATE_LOG_URLS = {
+    'https://raw.githubusercontent.com/Garagoro/Pastethic/refs/heads/main/updates.json',
+    'https://cdn.jsdelivr.net/gh/Garagoro/Pastethic@main/updates.json'
+}
 local DEFAULT_BASE_URLS = {
     'https://raw.githubusercontent.com/Garagoro/Pastethic/refs/heads/main/',
     'https://cdn.jsdelivr.net/gh/Garagoro/Pastethic@main/'
@@ -102,9 +106,9 @@ function M.new(deps)
         return ('string len=%d preview=%q'):format(#body, preview)
     end
 
-    local function decode_manifest(body)
+    local function decode_json(body, label)
         if type(body) ~= 'string' or body == '' then
-            return nil, 'empty manifest body: ' .. body_preview(body)
+            return nil, ('empty %s body: %s'):format(label, body_preview(body))
         end
 
         body = body:gsub('^\239\187\191', ''):gsub('^%s+', '')
@@ -118,7 +122,17 @@ function M.new(deps)
         local ok, decoded = pcall(parser, body)
 
         if not ok then
-            return nil, ('json decode failed: %s; %s'):format(tostring(decoded), body_preview(body))
+            return nil, ('%s json decode failed: %s; %s'):format(label, tostring(decoded), body_preview(body))
+        end
+
+        return decoded
+    end
+
+    local function decode_manifest(body)
+        local decoded, err = decode_json(body, 'manifest')
+
+        if decoded == nil then
+            return nil, err
         end
 
         if type(decoded) ~= 'table' then
@@ -127,6 +141,24 @@ function M.new(deps)
 
         if type(decoded.files) ~= 'table' then
             return nil, ('manifest files is %s; %s'):format(type(decoded.files), body_preview(body))
+        end
+
+        return decoded
+    end
+
+    local function decode_update_log(body)
+        local decoded, err = decode_json(body, 'update log')
+
+        if decoded == nil then
+            return nil, err
+        end
+
+        if type(decoded) ~= 'table' then
+            return nil, ('update log root is %s; %s'):format(type(decoded), body_preview(body))
+        end
+
+        if type(decoded.entries) ~= 'table' then
+            return nil, ('update log entries is %s; %s'):format(type(decoded.entries), body_preview(body))
         end
 
         return decoded
@@ -251,6 +283,19 @@ function M.new(deps)
             end
 
             callback(manifest, body, nil)
+        end)
+    end
+
+    local function fetch_update_log(callback)
+        return http_get_first(UPDATE_LOG_URLS, function(body, err)
+            local updates, decode_error = decode_update_log(body)
+
+            if updates == nil then
+                callback(nil, decode_error or err or 'bad update log json')
+                return
+            end
+
+            callback(updates, nil)
         end)
     end
 
@@ -455,6 +500,66 @@ function M.new(deps)
                     finish_one(false)
                 end
             end
+        end
+
+        return true
+    end
+
+    function manager.print_update_log(callback)
+        if state.busy then
+            error_log('update task is already running')
+            return false
+        end
+
+        state.busy = true
+        log('fetching update log...')
+
+        local started = fetch_update_log(function(updates, err)
+            state.busy = false
+
+            if updates == nil then
+                error_log('update log failed: ' .. tostring(err or 'download failed'))
+
+                if callback ~= nil then callback(false, state) end
+                return
+            end
+
+            log('update log:')
+
+            for i = 1, #updates.entries do
+                local entry = updates.entries[i]
+                local header = tostring(entry.version or ('entry ' .. i))
+
+                if type(entry.date) == 'string' and entry.date ~= '' then
+                    header = header .. ' - ' .. entry.date
+                end
+
+                if type(entry.title) == 'string' and entry.title ~= '' then
+                    header = header .. ' - ' .. entry.title
+                end
+
+                log(header)
+
+                if type(entry.changes) == 'table' then
+                    for j = 1, #entry.changes do
+                        log('  - ' .. tostring(entry.changes[j]))
+                    end
+                end
+            end
+
+            if #updates.entries == 0 then
+                log('  no entries')
+            end
+
+            if callback ~= nil then callback(true, state) end
+        end)
+
+        if not started then
+            state.busy = false
+            error_log('update log failed: gamesense/http unavailable')
+
+            if callback ~= nil then callback(false, state) end
+            return false
         end
 
         return true
