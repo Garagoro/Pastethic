@@ -10,8 +10,9 @@ function M.new(deps)
     }
 
     local function log(message)
-        if client ~= nil and client.log ~= nil then
-            client.log(prefix .. ' ' .. message)
+        if client ~= nil and client.color_log ~= nil then
+            client.color_log(180, 100, 255, prefix .. ' \0')
+            client.color_log(255, 255, 255, message)
         end
     end
 
@@ -19,7 +20,6 @@ function M.new(deps)
         if type(module) ~= 'table' then
             self.failed = self.failed + 1
             self.records[name] = { ok = false, error = 'module is not a table' }
-            log(('module %s: failed: module is not a table'):format(name))
             return false
         end
 
@@ -30,7 +30,6 @@ function M.new(deps)
                 if type(module[method]) ~= 'function' then
                     self.failed = self.failed + 1
                     self.records[name] = { ok = false, error = 'missing method ' .. method }
-                    log(('module %s: failed: missing method %s'):format(name, method))
                     return false
                 end
             end
@@ -45,13 +44,11 @@ function M.new(deps)
         if ok then
             self.ok = self.ok + 1
             self.records[name] = { ok = true, result = result }
-            log(('module %s: ok'):format(name))
             return result
         end
 
         self.failed = self.failed + 1
         self.records[name] = { ok = false, error = tostring(result) }
-        log(('module %s: failed: %s'):format(name, tostring(result)))
         return nil
     end
 
@@ -63,16 +60,22 @@ function M.new(deps)
         local ok, result = pcall(module.health, ctx)
 
         if ok and result ~= false then
-            log(('module %s health: ok'):format(name))
             return true
         end
 
-        log(('module %s health: failed: %s'):format(name, tostring(result)))
         return false
     end
 
     function diag:summary()
-        log(('modules ok: %d, failed: %d'):format(self.ok, self.failed))
+        local total = self.ok + self.failed
+        log(('loaded %d/%d. errors: %d'):format(self.ok, total, self.failed))
+        if self.failed > 0 then
+            for name, record in pairs(self.records) do
+                if not record.ok then
+                    log(('failed: %s: %s'):format(name, record.error or '?'))
+                end
+            end
+        end
     end
 
     return diag
