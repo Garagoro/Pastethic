@@ -92,15 +92,35 @@ function M.new(deps)
         end
     end
 
+    local function body_preview(body)
+        if type(body) ~= 'string' then
+            return type(body)
+        end
+
+        local preview = body:sub(1, 160):gsub('[\r\n\t]', ' ')
+
+        return ('string len=%d preview=%q'):format(#body, preview)
+    end
+
     local function decode_manifest(body)
         if type(body) ~= 'string' or body == '' then
-            return nil
+            return nil, 'empty manifest body: ' .. body_preview(body)
         end
+
+        body = body:gsub('^\239\187\191', ''):gsub('^%s+', '')
 
         local ok, decoded = pcall(json.decode, body)
 
-        if not ok or type(decoded) ~= 'table' or type(decoded.files) ~= 'table' then
-            return nil
+        if not ok then
+            return nil, ('json decode failed: %s; %s'):format(tostring(decoded), body_preview(body))
+        end
+
+        if type(decoded) ~= 'table' then
+            return nil, ('manifest root is %s; %s'):format(type(decoded), body_preview(body))
+        end
+
+        if type(decoded.files) ~= 'table' then
+            return nil, ('manifest files is %s; %s'):format(type(decoded.files), body_preview(body))
         end
 
         return decoded
@@ -119,22 +139,32 @@ function M.new(deps)
             if type(success_flag) == 'table' and response == nil then
                 response = success_flag
                 success_flag = true
+            elseif type(success_flag) == 'string' and response == nil then
+                body = success_flag
+                status = 200
+                success_flag = true
+            elseif type(success_flag) == 'number' and type(response) == 'string' then
+                status = success_flag
+                body = response
+                success_flag = status == 200
             end
 
             if type(response) == 'table' then
                 status = response.status or response.status_code or response.code
-                body = response.body or response.data
-            elseif type(response) == 'string' then
+                body = response.body or response.data or response.content or response.text
+            elseif type(response) == 'string' and body == nil then
                 status = 200
                 body = response
             end
 
-            if success_flag and status == 200 and type(body) == 'string' then
+            local status_ok = status == nil or status == 200 or status == '200'
+
+            if success_flag and status_ok and type(body) == 'string' then
                 callback(body)
                 return
             end
 
-            callback(nil, ('%s status=%s body=%s'):format(tostring(success_flag), tostring(status), type(body)))
+            callback(nil, ('%s status=%s %s'):format(tostring(success_flag), tostring(status), body_preview(body)))
         end)
 
         return request_ok
@@ -207,10 +237,10 @@ function M.new(deps)
 
     local function fetch_manifest(callback)
         return http_get_first(MANIFEST_URLS, function(body, err)
-            local manifest = decode_manifest(body)
+            local manifest, decode_error = decode_manifest(body)
 
             if manifest == nil then
-                callback(nil, nil, err or 'bad manifest json')
+                callback(nil, nil, decode_error or err or 'bad manifest json')
                 return
             end
 
