@@ -3,6 +3,10 @@
     "name":  "Pasthetic",
     "branch":  "main",
     "base_url":  "https://raw.githubusercontent.com/Garagoro/Pastethic/main/",
+    "base_urls":  [
+                      "https://raw.githubusercontent.com/Garagoro/Pastethic/main/",
+                      "https://cdn.jsdelivr.net/gh/Garagoro/Pastethic@main/"
+                  ],
     "files":  [
                   {
                       "path":  "anim_breaker.lua",
@@ -46,8 +50,8 @@
                   },
                   {
                       "path":  "config_controller.lua",
-                      "size":  35730,
-                      "checksum":  "89b9fbc9"
+                      "size":  36883,
+                      "checksum":  "ff671ed4"
                   },
                   {
                       "path":  "config_system.lua",
@@ -176,8 +180,8 @@
                   },
                   {
                       "path":  "resource_builder.lua",
-                      "size":  130793,
-                      "checksum":  "49cfdfce"
+                      "size":  131479,
+                      "checksum":  "da6c6984"
                   },
                   {
                       "path":  "runtime_modules.lua",
@@ -208,6 +212,11 @@
                       "path":  "ui_overrides.lua",
                       "size":  2479,
                       "checksum":  "89f7d168"
+                  },
+                  {
+                      "path":  "update_manager.lua",
+                      "size":  12245,
+                      "checksum":  "68856e35"
                   },
                   {
                       "path":  "utils.lua",

@@ -1072,7 +1072,7 @@ local resource do
 
                 items.pitch_offset_1 = config_system.push(
                     'Builder', hash 'pitch_offset_1', menu.new(
-                        ui.new_slider, 'AA', 'Other', new_key('\n', hash 'pitch_offset_1'), -89, 89, 0, true, '°'
+                        ui.new_slider, 'AA', 'Other', new_key('\n', hash 'pitch_offset_1'), -89, 89, 0, true, '?'
                     )
                 )
 
@@ -1082,7 +1082,7 @@ local resource do
 
                 items.pitch_offset_2 = config_system.push(
                     'Builder', hash 'pitch_offset_2', menu.new(
-                        ui.new_slider, 'AA', 'Other', new_key('\n', hash 'pitch_offset_2'), -89, 89, 0, true, '°'
+                        ui.new_slider, 'AA', 'Other', new_key('\n', hash 'pitch_offset_2'), -89, 89, 0, true, '?'
                     )
                 )
 
@@ -1126,26 +1126,26 @@ local resource do
                 for i = 1, 7 do
                     items['way_' .. i] = config_system.push(
                         'Builder', hash('way_' .. i), menu.new(
-                            ui.new_slider, 'AA', 'Other', new_key('\n', hash('way_' .. i)), -180, 180, 0, true, '°'
+                            ui.new_slider, 'AA', 'Other', new_key('\n', hash('way_' .. i)), -180, 180, 0, true, '?'
                         )
                     )
                 end
 
                 items.yaw_offset = config_system.push(
                     'Builder', hash 'yaw_offset', menu.new(
-                        ui.new_slider, 'AA', 'Other', new_key('\n', hash 'yaw_offset'), -180, 180, 0, true, '°'
+                        ui.new_slider, 'AA', 'Other', new_key('\n', hash 'yaw_offset'), -180, 180, 0, true, '?'
                     )
                 )
 
                 items.yaw_left = config_system.push(
                     'Builder', hash 'yaw_left', menu.new(
-                        ui.new_slider, 'AA', 'Other', new_key('Yaw left', hash 'yaw_left'), -180, 180, 0, true, '°'
+                        ui.new_slider, 'AA', 'Other', new_key('Yaw left', hash 'yaw_left'), -180, 180, 0, true, '?'
                     )
                 )
 
                 items.yaw_right = config_system.push(
                     'Builder', hash 'yaw_right', menu.new(
-                        ui.new_slider, 'AA', 'Other', new_key('Yaw right', hash 'yaw_right'), -180, 180, 0, true, '°'
+                        ui.new_slider, 'AA', 'Other', new_key('Yaw right', hash 'yaw_right'), -180, 180, 0, true, '?'
                     )
                 )
 
@@ -1175,7 +1175,7 @@ local resource do
 
                 items.body_yaw_offset = config_system.push(
                     'Builder', hash 'body_yaw_offset', menu.new(
-                        ui.new_slider, 'AA', 'Other', new_key('\n', hash 'body_yaw_offset'), -180, 180, 0, true, '°'
+                        ui.new_slider, 'AA', 'Other', new_key('\n', hash 'body_yaw_offset'), -180, 180, 0, true, '?'
                     )
                 )
 
@@ -1278,13 +1278,13 @@ local resource do
 
                     items.yaw_left = config_system.push(
                         'Builder', hash 'yaw_left', menu.new(
-                            ui.new_slider, 'AA', 'Anti-aimbot angles', new_key('Yaw left', hash 'yaw_left'), -180, 180, 0, true, '°'
+                            ui.new_slider, 'AA', 'Anti-aimbot angles', new_key('Yaw left', hash 'yaw_left'), -180, 180, 0, true, '?'
                         )
                     )
 
                     items.yaw_right = config_system.push(
                         'Builder', hash 'yaw_right', menu.new(
-                            ui.new_slider, 'AA', 'Anti-aimbot angles', new_key('Yaw right', hash 'yaw_right'), -180, 180, 0, true, '°'
+                            ui.new_slider, 'AA', 'Anti-aimbot angles', new_key('Yaw right', hash 'yaw_right'), -180, 180, 0, true, '?'
                         )
                     )
 
@@ -1300,13 +1300,13 @@ local resource do
 
                             items['yaw_left_dir_' .. dir] = config_system.push(
                                 'Builder', hash('yaw_left_dir_' .. dir), menu.new(
-                                    ui.new_slider, 'AA', 'Anti-aimbot angles', new_key('Yaw left', hash('yaw_left_dir_' .. dir)), -180, 180, 0, true, '°'
+                                    ui.new_slider, 'AA', 'Anti-aimbot angles', new_key('Yaw left', hash('yaw_left_dir_' .. dir)), -180, 180, 0, true, '?'
                                 )
                             )
 
                             items['yaw_right_dir_' .. dir] = config_system.push(
                                 'Builder', hash('yaw_right_dir_' .. dir), menu.new(
-                                    ui.new_slider, 'AA', 'Anti-aimbot angles', new_key('Yaw left', hash('yaw_right_dir_' .. dir)), -180, 180, 0, true, '°'
+                                    ui.new_slider, 'AA', 'Anti-aimbot angles', new_key('Yaw left', hash('yaw_right_dir_' .. dir)), -180, 180, 0, true, '?'
                                 )
                             )
                         end
@@ -1335,7 +1335,7 @@ local resource do
 
                     items.jitter_offset = config_system.push(
                         'Builder', hash 'jitter_offset', menu.new(
-                            ui.new_slider, 'AA', 'Anti-aimbot angles', new_key('\n', hash 'jitter_offset'), -180, 180, 0, true, '°'
+                            ui.new_slider, 'AA', 'Anti-aimbot angles', new_key('\n', hash 'jitter_offset'), -180, 180, 0, true, '?'
                         )
                     )
 
@@ -1347,13 +1347,13 @@ local resource do
 
                     items.jitter_min = config_system.push(
                         'Builder', hash 'jitter_min', menu.new(
-                            ui.new_slider, 'AA', 'Anti-aimbot angles', new_key('Min', hash 'jitter_min'), -180, 180, -60, true, '°'
+                            ui.new_slider, 'AA', 'Anti-aimbot angles', new_key('Min', hash 'jitter_min'), -180, 180, -60, true, '?'
                         )
                     )
 
                     items.jitter_max = config_system.push(
                         'Builder', hash 'jitter_max', menu.new(
-                            ui.new_slider, 'AA', 'Anti-aimbot angles', new_key('Max', hash 'jitter_max'), -180, 180, 60, true, '°'
+                            ui.new_slider, 'AA', 'Anti-aimbot angles', new_key('Max', hash 'jitter_max'), -180, 180, 60, true, '?'
                         )
                     )
 
@@ -1384,7 +1384,7 @@ local resource do
 
                 items.body_yaw_offset = config_system.push(
                     'Builder', hash 'body_yaw_offset', menu.new(
-                        ui.new_slider, 'AA', 'Anti-aimbot angles', new_key('\n', hash 'body_yaw_offset'), -180, 180, 0, true, '°'
+                        ui.new_slider, 'AA', 'Anti-aimbot angles', new_key('\n', hash 'body_yaw_offset'), -180, 180, 0, true, '?'
                     )
                 )
 
@@ -1697,7 +1697,7 @@ local resource do
 
                 flick_exploit.pitch_offset_1 = config_system.push(
                     'Features', 'flick_pitch_offset_1', menu.new(
-                        ui.new_slider, 'AA', 'Anti-aimbot angles', new_key('\n', 'flick_pitch_offset_1'), -89, 89, 0, true, '°'
+                        ui.new_slider, 'AA', 'Anti-aimbot angles', new_key('\n', 'flick_pitch_offset_1'), -89, 89, 0, true, '?'
                     )
                 )
 
@@ -1707,7 +1707,7 @@ local resource do
 
                 flick_exploit.pitch_offset_2 = config_system.push(
                     'Features', 'flick_pitch_offset_2', menu.new(
-                        ui.new_slider, 'AA', 'Anti-aimbot angles', new_key('\n', 'flick_pitch_offset_2'), -89, 89, 0, true, '°'
+                        ui.new_slider, 'AA', 'Anti-aimbot angles', new_key('\n', 'flick_pitch_offset_2'), -89, 89, 0, true, '?'
                     )
                 )
 
@@ -1908,7 +1908,7 @@ local resource do
 
                 roll_aa.value = config_system.push(
                     'Hotkeys', 'roll_aa.value', menu.new(
-                        ui.new_slider, 'AA', 'Anti-aimbot angles', new_key('Value', 'roll_aa'), -50, 50, 0, true, '°'
+                        ui.new_slider, 'AA', 'Anti-aimbot angles', new_key('Value', 'roll_aa'), -50, 50, 0, true, '?'
                     )
                 )
 
@@ -2258,6 +2258,14 @@ local resource do
             ui.new_button, 'AA', 'Anti-aimbot angles', 'Import from clipboard', nil
         )
 
+
+        config.check_updates_button = menu.new(
+            ui.new_button, 'AA', 'Anti-aimbot angles', 'Check updates', nil
+        )
+
+        config.download_update_button = menu.new(
+            ui.new_button, 'AA', 'Anti-aimbot angles', 'Download update', nil
+        )
         lock_unselection(config.categories)
 
         resource.config = config
@@ -3179,6 +3187,8 @@ local resource do
                 menu_logic.set(config.share_all_active_button, true)
                 menu_logic.set(config.import_button, true)
                 menu_logic.set(config.export_button, true)
+                menu_logic.set(config.check_updates_button, true)
+                menu_logic.set(config.download_update_button, config.has_update_available ~= nil and config.has_update_available())
             end
         end
 
