@@ -15,7 +15,6 @@ function M.start(deps)
     local client = assert(deps.client, 'config_controller: client dependency is required')
     local ui = assert(deps.ui, 'config_controller: ui dependency is required')
     local contains = assert(deps.contains, 'config_controller: contains dependency is required')
-    local update_manager = deps.update_manager
 local config do
     local ref = resource.config
 
@@ -1156,43 +1155,6 @@ local config do
 
             import_script_config_payload(result)
         end
-        local function on_check_updates()
-            if update_manager == nil then
-                logging.error('update manager is unavailable')
-                return
-            end
-
-            update_manager.check(function()
-                menu_logic.update()
-            end)
-        end
-
-        local function on_download_update()
-            if update_manager == nil then
-                logging.error('update manager is unavailable')
-                return
-            end
-
-            update_manager.download(function()
-                menu_logic.update()
-            end)
-        end
-
-        local function on_print_update_log()
-            if update_manager == nil then
-                logging.error('update manager is unavailable')
-                return
-            end
-
-            update_manager.print_update_log(function()
-                menu_logic.update()
-            end)
-        end
-
-        ref.has_update_available = function()
-            return update_manager ~= nil and update_manager.has_update ~= nil and update_manager.has_update()
-        end
-
         ref.list:set_callback(on_list)
 
         ref.load_button:set_callback(on_load)
@@ -1208,11 +1170,6 @@ local config do
         ref.skin_export_button:set_callback(on_skin_export)
         ref.skin_import_button:set_callback(on_skin_import)
         ref.share_all_active_button:set_callback(on_share_all_active)
-        ref.check_updates_button:set_callback(on_check_updates)
-        ref.print_update_log_button:set_callback(on_print_update_log)
-        ref.download_update_button:set_callback(on_download_update)
-
-
         ref.export_button:set_callback(on_export)
         ref.import_button:set_callback(on_import)
 

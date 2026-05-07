@@ -2219,17 +2219,6 @@ local resource do
         )
 
 
-        config.check_updates_button = menu.new(
-            ui.new_button, 'AA', 'Anti-aimbot angles', 'Check updates', nil
-        )
-
-        config.print_update_log_button = menu.new(
-            ui.new_button, 'AA', 'Anti-aimbot angles', 'Print update log to console', nil
-        )
-
-        config.download_update_button = menu.new(
-            ui.new_button, 'AA', 'Anti-aimbot angles', 'Download update', nil
-        )
         lock_unselection(config.categories)
 
         resource.config = config
@@ -3151,9 +3140,7 @@ local resource do
                 menu_logic.set(config.share_all_active_button, true)
                 menu_logic.set(config.import_button, true)
                 menu_logic.set(config.export_button, true)
-                menu_logic.set(config.check_updates_button, true)
-                menu_logic.set(config.print_update_log_button, true)
-                menu_logic.set(config.download_update_button, config.has_update_available ~= nil and config.has_update_available())
+
             end
         end
 
