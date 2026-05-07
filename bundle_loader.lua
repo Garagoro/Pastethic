@@ -3,6 +3,12 @@ local M = {}
 -- Loads external Lua bundles from pasthetic\bundles first, with optional patch hooks.
 -- This module only reads/compiles/runs a bundle requested by the entrypoint.
 
+local function log_err(client, msg)
+    if client == nil then return end
+    client.color_log(250, 50, 75, '[Pasthetic] \0')
+    client.color_log(255, 255, 255, msg)
+end
+
 function M.load(deps, label, paths)
     deps = deps or {}
     paths = paths or {}
@@ -13,10 +19,7 @@ function M.load(deps, label, paths)
     local patches = deps.patches
 
     if loadstring == nil then
-        if client ~= nil and client.log ~= nil then
-            client.log(('[%s] cannot load bundled %s: loadstring unavailable'):format('Pasthetic', label))
-        end
-
+        log_err(client, 'cannot load bundled ' .. label .. ': loadstring unavailable')
         return false
     end
     local bundled_path = 'pasthetic\\bundles\\' .. label
@@ -26,10 +29,7 @@ function M.load(deps, label, paths)
         search_paths[#search_paths + 1] = paths[i]
     end
     if readfile == nil then
-        if client ~= nil and client.log ~= nil then
-            client.log(('[%s] failed to find embedded %s and readfile is unavailable'):format('Pasthetic', label))
-        end
-
+        log_err(client, 'cannot load bundled ' .. label .. ': readfile unavailable')
         return false
     end
 
@@ -50,20 +50,14 @@ function M.load(deps, label, paths)
                     return true
                 end
 
-                if client ~= nil and client.log ~= nil then
-                    client.log(('[%s] failed to run bundled %s: %s'):format('Pasthetic', label, tostring(runtime_error)))
-                end
-
+                log_err(client, 'failed to run bundled ' .. label .. ': ' .. tostring(runtime_error))
                 return false
             end
 
-            if client ~= nil and client.log ~= nil then
-                client.log(('[%s] failed to compile bundled %s: %s'):format('Pasthetic', label, tostring(load_error)))
-            end
-
+            log_err(client, 'failed to compile bundled ' .. label .. ': ' .. tostring(load_error))
             return false
-        elseif i == #search_paths and client ~= nil and client.log ~= nil then
-            client.log(('[%s] failed to find bundled %s'):format('Pasthetic', label))
+        elseif i == #search_paths then
+            log_err(client, 'failed to find bundled ' .. label .. ' (tried: ' .. bundled_path .. ')')
         end
     end
 

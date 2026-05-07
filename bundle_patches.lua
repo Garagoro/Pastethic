@@ -3,6 +3,10 @@ local M = {}
 -- Patch the external colorskins bundle so it cooperates with Pasthetic configs/runtime.
 -- Keep this module data-only: no UI, callbacks, or globals are created here.
 function M.patch_colorskins(source)
+    return source
+end
+
+function M._patch_colorskins_legacy(source)
     source = source:gsub('\r\n', '\n')
 
     source = source:gsub(
