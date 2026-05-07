@@ -109,7 +109,13 @@ function M.new(deps)
 
         body = body:gsub('^\239\187\191', ''):gsub('^%s+', '')
 
-        local ok, decoded = pcall(json.decode, body)
+        local parser = json.parse or json.decode
+
+        if type(parser) ~= 'function' then
+            return nil, 'json parser unavailable'
+        end
+
+        local ok, decoded = pcall(parser, body)
 
         if not ok then
             return nil, ('json decode failed: %s; %s'):format(tostring(decoded), body_preview(body))
