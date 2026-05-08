@@ -4,9 +4,10 @@ local LOGO_URL_CURRENT = 'https://raw.githubusercontent.com/Garagoro/Pasthetic/r
 local LOGO_URL_LEGACY  = 'https://raw.githubusercontent.com/Garagoro/Pasthetic/refs/heads/main/logo%203.png'
 local MESSAGE_MAGIC    = 'PTH_SHARED_LOGO'
 local MESSAGE_VERSION  = '2'
-local HEARTBEAT_INTERVAL   = 1.25
-local SCOREBOARD_INTERVAL  = 1.0
-local PLAYER_TTL           = 7.0
+local BUILD            = '20260508'
+local HEARTBEAT_INTERVAL    = 1.25
+local SCOREBOARD_INTERVAL   = 1.0
+local PLAYER_TTL            = 7.0
 
 function M.start(ctx)
     ctx = ctx or {}
@@ -32,9 +33,9 @@ function M.start(ctx)
     end)()
 
     -- shared_players maps xuid -> logo_url
-    local shared_players = {}
-    local last_seen      = {}
-    local last_heartbeat        = 0
+    local shared_players         = {}
+    local last_seen              = {}
+    local last_heartbeat         = 0
     local last_scoreboard_update = 0
 
     local scoreboard_images = panorama.loadstring([[
@@ -190,6 +191,7 @@ function M.start(ctx)
             buf:write_string(MESSAGE_MAGIC)
             buf:write_string(MESSAGE_VERSION)
             buf:write_string(xuid)
+            buf:write_string(BUILD)
         end)
     end
 
@@ -207,9 +209,18 @@ function M.start(ctx)
             return
         end
 
-        if version == MESSAGE_VERSION then
+        if version ~= MESSAGE_VERSION then
+            -- old standalone script (v1) or unknown version
+            mark_shared_player(xuid, LOGO_URL_LEGACY)
+            return
+        end
+
+        local build = buf:read_string()
+
+        if build == BUILD then
             mark_shared_player(xuid, LOGO_URL_CURRENT)
-        elseif version == '1' then
+        else
+            -- same protocol but outdated files
             mark_shared_player(xuid, LOGO_URL_LEGACY)
         end
     end)
