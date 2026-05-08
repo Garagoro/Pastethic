@@ -22,9 +22,11 @@ function M.start(ctx)
     local pasthetic_anim_breaker = require_pasthetic_module 'pasthetic/anim_breaker'
     local pasthetic_logging_system = require_pasthetic_module 'pasthetic/logging_system'
     local pasthetic_antiaim = require_pasthetic_module 'pasthetic/antiaim'
+    local pasthetic_antiaim_predicted_at_targets = require_pasthetic_module 'pasthetic/antiaim_predicted_at_targets'
     local pasthetic_antiaim_presets = require_pasthetic_module 'pasthetic/antiaim_presets'
     local pasthetic_item_crash_fix = require_pasthetic_module 'pasthetic/item_crash_fix'
     local pasthetic_world_enhancer = require_pasthetic_module 'pasthetic/world_enhancer'
+    local pasthetic_world_ragdolls = require_pasthetic_module 'pasthetic/world_ragdolls'
 
     local script = ctx.script
     local resource = ctx.resource
@@ -295,6 +297,8 @@ function M.start(ctx)
             exploit = exploit,
             bit = bit,
             toticks = toticks,
+            cvar = cvar,
+            predicted_at_targets = pasthetic_antiaim_predicted_at_targets,
             presets = pasthetic_antiaim_presets
         })
     end)
@@ -325,6 +329,14 @@ function M.start(ctx)
         })
     end)
     diagnostics:health('world_enhancer', pasthetic_world_enhancer)
+
+    diagnostics:start('world_ragdolls', function()
+        return pasthetic_world_ragdolls.start({
+            resource = resource,
+            entity = entity,
+            utils = utils
+        })
+    end)
 
     diagnostics:summary()
 

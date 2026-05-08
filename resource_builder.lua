@@ -1735,6 +1735,16 @@ local resource do
                 features.flick_exploit = flick_exploit
             end
 
+            local predicted_at_targets = { } do
+                predicted_at_targets.enabled = config_system.push(
+                    'Features', 'predicted_at_targets.enabled', menu.new(
+                        ui.new_checkbox, 'AA', 'Anti-aimbot angles', new_key('Predicted at targets', 'predicted_at_targets')
+                    )
+                )
+
+                features.predicted_at_targets = predicted_at_targets
+            end
+
             antiaim.features = features
         end
 
@@ -2073,6 +2083,9 @@ local resource do
                 enable  = menu.new(ui.new_checkbox,     "AA", "Anti-aimbot angles", new_key("Hitboxes on hit",   "we_hb")),
                 color   = menu.new(ui.new_color_picker, "AA", "Anti-aimbot angles", new_key("Hitbox color",      "we_hb"), 255, 255, 255, 255),
                 timer   = menu.new(ui.new_slider,       "AA", "Anti-aimbot angles", new_key("Hitboxes timer",    "we_hb"), 1, 10, 2),
+            }
+            world_section.ragdolls = {
+                remove = menu.new(ui.new_checkbox, "AA", "Anti-aimbot angles", new_key("Remove ragdolls", "we_rg")),
             }
             render_we.world = world_section
         end
@@ -2954,6 +2967,16 @@ local resource do
                     ::continue::
                 end
 
+                local is_predicted_at_targets = ref.predicted_at_targets.enabled:get() do
+                    menu_logic.set(ref.predicted_at_targets.enabled, true)
+
+                    if not is_predicted_at_targets then
+                        goto continue
+                    end
+
+                    ::continue::
+                end
+
                 local fakelag do
                     local ref = resource.antiaim.fakelag
 
@@ -3123,6 +3146,8 @@ local resource do
                     menu_logic.set(ref.hitbox_on_hit.color, true)
                     menu_logic.set(ref.hitbox_on_hit.timer, true)
                 end
+
+                menu_logic.set(ref.ragdolls.remove, true)
 
             end
             -- Configurations

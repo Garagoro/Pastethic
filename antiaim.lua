@@ -17,6 +17,7 @@ function M.start(deps)
     local exploit = assert(deps.exploit, 'antiaim: exploit dependency is required')
     local bit = assert(deps.bit, 'antiaim: bit dependency is required')
     local toticks = assert(deps.toticks, 'antiaim: toticks dependency is required')
+    local cvar = deps.cvar or cvar
     local presets = assert(deps.presets, 'antiaim: presets dependency is required')
     local preset_runtime = presets.new({ utils = utils })
 local antiaim = { } do
@@ -148,6 +149,21 @@ local antiaim = { } do
         setmetatable(buffer, Buffer)
         antiaim.buffer = buffer
     end
+
+    local predicted_at_targets = assert(
+        deps.predicted_at_targets,
+        'antiaim: predicted_at_targets dependency is required'
+    ).new({
+        resource = resource,
+        entity = entity,
+        client = client,
+        globals = globals,
+        vector = vector,
+        utils = utils,
+        bit = bit,
+        toticks = toticks,
+        cvar = cvar
+    })
 
     local safe_head = { } do
         local ref = resource.antiaim.features.safe_head
@@ -3233,6 +3249,7 @@ local antiaim = { } do
 
         update_antiaims(cmd)
         update_buffer(cmd)
+        predicted_at_targets:update(buffer)
 
         buffer:set()
     end
