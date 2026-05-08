@@ -373,7 +373,7 @@ function M.start(deps)
 
                     table.insert(preview_logs, string.format(
                         'Hit %s in the %s for %s damage (%s health remaining)',
-                        wrap_color(script.user, hex),
+                        wrap_color('You pathetic', hex),
                         wrap_color('stomach', hex),
                         wrap_color('93', hex),
                         wrap_color('7', hex)
@@ -401,14 +401,14 @@ function M.start(deps)
 
                     table.insert(preview_logs, string.format(
                         'Hit %s ~ group: %s ~ damage: %s hp',
-                        wrap_color(script.user, target_hex),
+                        wrap_color('You pathetic', target_hex),
                         wrap_color('stomach', other_hex),
                         wrap_color('93', other_hex)
                     ))
 
                     table.insert(preview_logs, string.format(
                         'Missed %s ~ group: %s ~ reason: %s',
-                        wrap_color(script.user, target_hex),
+                        wrap_color('cuz u pathetic', target_hex),
                         wrap_color('stomach', other_hex),
                         wrap_color('spread', miss_hex)
                     ))
