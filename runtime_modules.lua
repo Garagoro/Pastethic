@@ -158,7 +158,8 @@ function M.start(ctx)
                 vector = vector,
                 plist = plist,
                 utils = utils,
-                toticks = toticks
+                toticks = toticks,
+                software = software
             })
             end)
             diagnostics:start('rage_peek_assist', function()

@@ -9,6 +9,7 @@ function M.start(deps)
     local plist = assert(deps.plist, 'rage_auto_whitelist_broken_lc: plist dependency is required')
     local utils = assert(deps.utils, 'rage_auto_whitelist_broken_lc: utils dependency is required')
     local toticks = assert(deps.toticks, 'rage_auto_whitelist_broken_lc: toticks dependency is required')
+    local software = assert(deps.software, 'rage_auto_whitelist_broken_lc: software dependency is required')
 
     local ref = resource.main.ragebot.auto_whitelist_broken_lc
     local records = {}
@@ -89,6 +90,11 @@ function M.start(deps)
             return false
         end
 
+        local minimum_damage = software.is_override_minimum_damage()
+            and software.get_override_damage()
+            or software.get_minimum_damage()
+        minimum_damage = minimum_damage or 0
+
         local heights = { 62, 52, 40 }
 
         for i = 1, #heights do
@@ -99,7 +105,7 @@ function M.start(deps)
                 true
             )
 
-            if damage ~= nil and damage > 0 then
+            if damage ~= nil and damage >= minimum_damage then
                 return true
             end
         end
