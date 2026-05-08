@@ -95,6 +95,7 @@ local we_vars = {
         old_y   = client_get_cvar("viewmodel_offset_y"),
         old_z   = client_get_cvar("viewmodel_offset_z"),
     },
+    scope_hide = { x_current = nil },
     effects = {
         bloom_default = nil,
         exposure_min_default = nil,
@@ -492,6 +493,7 @@ we_cb.viewmodel_in_scope = function()
 end
 
 we_cb.viewmodel_changer = function()
+    we_vars.scope_hide.x_current = nil
     if not rm.viewmodel_changer.override:get() then
         client_set_cvar("viewmodel_fov",      we_vars.viewmodel.old_fov)
         client_set_cvar("viewmodel_offset_x", we_vars.viewmodel.old_x)
@@ -503,6 +505,48 @@ we_cb.viewmodel_changer = function()
     client_set_cvar("viewmodel_offset_x", rm.viewmodel_changer.x:get() / 10)
     client_set_cvar("viewmodel_offset_y", rm.viewmodel_changer.y:get() / 10)
     client_set_cvar("viewmodel_offset_z", rm.viewmodel_changer.z:get() / 10)
+end
+
+local SCOPE_WEAPONS = {
+    weapon_awp   = true,
+    weapon_ssg08 = true,
+    weapon_scar20 = true,
+    weapon_aug   = true,
+    weapon_sg556 = true,
+}
+
+we_cb.scope_hide_update = function()
+    if not rm.viewmodel_changer.override:get() or not rm.viewmodel_changer.scope_hide:get() then
+        we_vars.scope_hide.x_current = nil
+        return
+    end
+
+    local lp = entity_get_local_player()
+    if not lp then return end
+
+    local weapon = entity_get_player_weapon(lp)
+    local is_scope_weapon = weapon and SCOPE_WEAPONS[entity_get_classname(weapon) or '']
+    local is_scoped = is_scope_weapon and entity_get_prop(lp, "DT_CSPlayer", "m_bIsScoped") == 1
+
+    local base_x  = rm.viewmodel_changer.x:get() / 10
+    local target_x = is_scoped and -15 or base_x
+
+    if we_vars.scope_hide.x_current == nil then
+        we_vars.scope_hide.x_current = base_x
+    end
+
+    local speed  = rm.viewmodel_changer.scope_speed:get()
+    local factor = math.min(1, speed * globals_frametime())
+    local new_x  = we_vars.scope_hide.x_current + (target_x - we_vars.scope_hide.x_current) * factor
+
+    if math.abs(new_x - target_x) < 0.001 then
+        new_x = target_x
+    end
+
+    if new_x ~= we_vars.scope_hide.x_current then
+        we_vars.scope_hide.x_current = new_x
+        client_set_cvar("viewmodel_offset_x", new_x)
+    end
 end
 
 we_cb.remove_sleeves = function()
@@ -736,6 +780,7 @@ client.set_event_callback("paint", function()
     we_cb.bullet_tracers_draw()
     we_cb.draw_scope()
     we_cb.hitboxes_draw()
+    we_cb.scope_hide_update()
 end)
 
 client.set_event_callback("paint_ui", we_cb.draw_scope_ui)

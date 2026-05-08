@@ -2103,11 +2103,13 @@ local resource do
                 value       = menu.new(ui.new_slider,   "AA", "Anti-aimbot angles", new_key("Aspect ratio value", "we_ar"), 0, 200, 100, true, nil, 0.01),
             }
             misc_section.viewmodel_changer = {
-                override    = menu.new(ui.new_checkbox, "AA", "Anti-aimbot angles", new_key("Viewmodel changer", "we_vm")),
-                fov         = menu.new(ui.new_slider,   "AA", "Anti-aimbot angles", new_key("VM FOV",            "we_vm"), -60, 100, 54),
-                x           = menu.new(ui.new_slider,   "AA", "Anti-aimbot angles", new_key("VM offset X x10",  "we_vm"), -300, 300, 25),
-                y           = menu.new(ui.new_slider,   "AA", "Anti-aimbot angles", new_key("VM offset Y x10",  "we_vm"), -1000, 1000, -20),
-                z           = menu.new(ui.new_slider,   "AA", "Anti-aimbot angles", new_key("VM offset Z x10",  "we_vm"), -300, 300, -20),
+                override    = menu.new(ui.new_checkbox, "AA", "Anti-aimbot angles", new_key("Viewmodel changer",  "we_vm")),
+                fov         = menu.new(ui.new_slider,   "AA", "Anti-aimbot angles", new_key("VM FOV",             "we_vm"), -60, 100, 54),
+                x           = menu.new(ui.new_slider,   "AA", "Anti-aimbot angles", new_key("VM offset X x10",   "we_vm"), -300, 300, 25),
+                y           = menu.new(ui.new_slider,   "AA", "Anti-aimbot angles", new_key("VM offset Y x10",   "we_vm"), -1000, 1000, -20),
+                z           = menu.new(ui.new_slider,   "AA", "Anti-aimbot angles", new_key("VM offset Z x10",   "we_vm"), -300, 300, -20),
+                scope_hide  = menu.new(ui.new_checkbox, "AA", "Anti-aimbot angles", new_key("Hide X on scope",   "we_vm")),
+                scope_speed = menu.new(ui.new_slider,   "AA", "Anti-aimbot angles", new_key("Scope hide speed",  "we_vm"), 1, 30, 10),
             }
             misc_section.custom_scope = {
                 enable      = menu.new(ui.new_checkbox,     "AA", "Anti-aimbot angles", new_key("Custom scope",      "we_cs")),
@@ -2739,6 +2741,10 @@ local resource do
                     menu_logic.set(render_ref.viewmodel_changer.x, true)
                     menu_logic.set(render_ref.viewmodel_changer.y, true)
                     menu_logic.set(render_ref.viewmodel_changer.z, true)
+                    menu_logic.set(render_ref.viewmodel_changer.scope_hide, true)
+                    if render_ref.viewmodel_changer.scope_hide:get() then
+                        menu_logic.set(render_ref.viewmodel_changer.scope_speed, true)
+                    end
                 end
 
                 menu_logic.set(render_ref.custom_scope.enable, true)
