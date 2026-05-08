@@ -36,7 +36,8 @@ function M.start(ctx)
     local shared_players         = {}
     local last_seen              = {}
     local last_heartbeat         = 0
-    local last_scoreboard_update = 0
+    local last_cleanup           = 0
+    local scoreboard_dirty       = true
 
     local scoreboard_images = panorama.loadstring([[
         var name_panels = {};
@@ -105,9 +106,12 @@ function M.start(ctx)
                 var first_child = row.GetChild(0);
 
                 var image_panel = $.CreatePanel("Panel", row, "pasthetic_shared_logo_" + xuid);
+                image_panel.style.backgroundColor = "rgba(0, 0, 0, 0)";
                 var layout = ''
                     + '<root>'
-                    + '    <Image textureheight="20" texturewidth="20" style="margin-right: 5px; vertical-align: center;" src="' + logo_url + '" />'
+                    + '    <Panel style="width: 25px; height: 100%; vertical-align: center; margin-left: -1px; background-color: rgba(0,0,0,0);">'
+                    + '        <Image textureheight="20" texturewidth="20" style="vertical-align: center; horizontal-align: center;" src="' + logo_url + '" />'
+                    + '    </Panel>'
                     + '</root>';
 
                 image_panel.BLoadLayoutFromString(layout, false, false);
@@ -149,7 +153,11 @@ function M.start(ctx)
             return
         end
 
-        shared_players[xuid] = logo_url
+        if shared_players[xuid] ~= logo_url then
+            shared_players[xuid] = logo_url
+            scoreboard_dirty = true
+        end
+
         last_seen[xuid] = globals.realtime()
     end
 
@@ -165,12 +173,14 @@ function M.start(ctx)
             if xuid ~= local_xuid and now - seen_at > PLAYER_TTL then
                 last_seen[xuid] = nil
                 shared_players[xuid] = nil
+                scoreboard_dirty = true
             end
         end
     end
 
     local function update_scoreboard()
         scoreboard_images.update(shared_players)
+        scoreboard_dirty = false
     end
 
     local function send_heartbeat()
@@ -239,10 +249,13 @@ function M.start(ctx)
             last_heartbeat = now
         end
 
-        if now - last_scoreboard_update >= SCOREBOARD_INTERVAL then
+        if now - last_cleanup >= SCOREBOARD_INTERVAL then
             cleanup_shared_players()
+            last_cleanup = now
+        end
+
+        if scoreboard_dirty then
             update_scoreboard()
-            last_scoreboard_update = now
         end
     end)
 
