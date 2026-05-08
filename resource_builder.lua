@@ -700,6 +700,20 @@ local resource do
                 miscellaneous.reveal_enemy_team_chat = reveal_enemy_team_chat
             end
 
+            local clantag = { } do
+                clantag.enabled = config_system.push(
+                    'Miscellaneous', 'clantag.enabled', menu.new(
+                        ui.new_checkbox, 'AA', 'Anti-aimbot angles', new_key('Clantag', 'clantag')
+                    )
+                )
+
+                clantag.separator = menu.new(
+                    ui.new_label, 'AA', 'Anti-aimbot angles', '\n'
+                )
+
+                miscellaneous.clantag = clantag
+            end
+
             main.miscellaneous = miscellaneous
         end
 
@@ -2684,6 +2698,11 @@ local resource do
                 menu_logic.set(ref.console_filter.enabled, true)
                 menu_logic.set(ref.sync_ragebot_hotkeys.enabled, true)
                 menu_logic.set(ref.reveal_enemy_team_chat.enabled, true)
+                menu_logic.set(ref.clantag.enabled, true)
+
+                if ref.clantag.enabled:get() then
+                    menu_logic.set(ref.clantag.separator, true)
+                end
 
                 local render_ref = resource.render_we.misc
 

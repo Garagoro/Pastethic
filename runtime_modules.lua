@@ -17,6 +17,7 @@ function M.start(ctx)
     local pasthetic_misc_console_filter = require_pasthetic_module 'pasthetic/misc_console_filter'
     local pasthetic_misc_sync_ragebot_hotkeys = require_pasthetic_module 'pasthetic/misc_sync_ragebot_hotkeys'
     local pasthetic_misc_reveal_enemy_team_chat = require_pasthetic_module 'pasthetic/misc_reveal_enemy_team_chat'
+    local pasthetic_clantag = require_pasthetic_module 'pasthetic/clantag'
     local pasthetic_automatic_purchase = require_pasthetic_module 'pasthetic/automatic_purchase'
     local pasthetic_anim_breaker = require_pasthetic_module 'pasthetic/anim_breaker'
     local pasthetic_logging_system = require_pasthetic_module 'pasthetic/logging_system'
@@ -231,6 +232,15 @@ function M.start(ctx)
                 localize = localize,
                 utils = utils
             })
+            end)
+
+            diagnostics:start('clantag', function()
+                return pasthetic_clantag.start({
+                    resource = resource,
+                    client = client,
+                    globals = globals,
+                    utils = utils
+                })
             end)
         end
 
