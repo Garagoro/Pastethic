@@ -707,12 +707,6 @@ local resource do
                     )
                 )
 
-                clantag.restore_tag = config_system.push(
-                    'Miscellaneous', 'clantag.restore_tag', menu.new(
-                        ui.new_textbox, 'AA', 'Anti-aimbot angles', new_key('Restore tag', 'clantag')
-                    )
-                )
-
                 clantag.separator = menu.new(
                     ui.new_label, 'AA', 'Anti-aimbot angles', '\n'
                 )

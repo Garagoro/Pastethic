@@ -84,8 +84,17 @@ function M.start(deps)
         return frames[index], index
     end
 
+    local function reset()
+        last_tag = nil
+        last_index = nil
+        client.set_clan_tag('')
+    end
+
     local function on_paint()
         if not ref.enabled:get() then
+            if last_tag ~= nil then
+                reset()
+            end
             return
         end
 
@@ -98,12 +107,6 @@ function M.start(deps)
         set_tag(tag)
     end
 
-    local function reset()
-        last_tag = nil
-        last_index = nil
-        client.set_clan_tag(ref.restore_tag:get() or '')
-    end
-
     local function on_enabled(item)
         local enabled = item:get()
 
@@ -111,10 +114,10 @@ function M.start(deps)
             reset()
         end
 
-        utils.event_callback('paint', on_paint, enabled)
         utils.event_callback('shutdown', reset, enabled)
     end
 
+    utils.event_callback('paint', on_paint, true)
     ref.enabled:set_callback(on_enabled, true)
 end
 
