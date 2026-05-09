@@ -260,6 +260,32 @@ function M.start(deps)
             }
         };
 
+        var _ApplyBackgroundGeometry = function(host, layer) {
+            if (!host || !layer) {
+                return;
+            }
+
+            var width = Number(host.actuallayoutwidth || host.actualwidth) || 0;
+            var height = Number(host.actuallayoutheight || host.actualheight) || 0;
+
+            if (width > 0) {
+                layer.style.width = (width + 100) + "px";
+            } else {
+                layer.style.width = "105%";
+            }
+
+            if (height > 0) {
+                layer.style.height = (height + 100) + "px";
+            } else {
+                layer.style.height = "110%";
+            }
+
+            layer.style.horizontalAlign = "left";
+            layer.style.verticalAlign = "top";
+            layer.style.marginLeft = "-67px";
+            layer.style.marginTop = "-50px";
+        };
+
         var _ChangeBackground = function(imageUrl) {
             var movieElements = [
                 "MainMenuMovie",
@@ -293,17 +319,13 @@ function M.start(deps)
 
             var host = _FindBackgroundHost();
             var layer = $.CreatePanel("Panel", host, BACKGROUND_LAYER_ID);
-            layer.style.width = "100%";
-            layer.style.height = "100%";
-            layer.style.horizontalAlign = "center";
-            layer.style.verticalAlign = "center";
-            layer.style.marginLeft = "0px";
             layer.style.backgroundImage = 'url("' + imageUrl + '")';
             layer.style.backgroundPosition = "center";
             layer.style.backgroundSize = "cover";
             layer.style.backgroundRepeat = "no-repeat";
             layer.style.transform = "none";
             layer.style.opacity = "1";
+            _ApplyBackgroundGeometry(host, layer);
 
             try { layer.hittest = false; } catch (e) {}
             try { layer.hittestchildren = false; } catch (e) {}
@@ -311,6 +333,10 @@ function M.start(deps)
             try {
                 host.MoveChildBefore(layer, host.GetChild(0));
             } catch (e) {}
+
+            $.Schedule(0.0, function() {
+                _ApplyBackgroundGeometry(host, layer);
+            });
         };
 
         var _RestoreDefault = function() {
