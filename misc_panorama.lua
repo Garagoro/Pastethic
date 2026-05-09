@@ -56,7 +56,7 @@ function M.start(deps)
     local state = {
         cslogo = false,
         logo_url = nil,
-        news = false,
+        news_mode = 'none',
         background = false,
         stats = false,
         watch = false,
@@ -138,6 +138,7 @@ function M.start(deps)
         var js_news = null;
         var original_transform = null;
         var original_visibility = null;
+        var hidden_children = [];
 
         var _Create = function() {
             js_news = $.GetContextPanel().FindChildTraverse("JsNewsContainer");
@@ -165,6 +166,8 @@ function M.start(deps)
         };
 
         var _Destroy = function() {
+            _RestoreContent();
+
             if (js_news) {
                 if (panel) {
                     panel.DeleteAsync(0.0);
@@ -176,9 +179,56 @@ function M.start(deps)
             }
         };
 
+        var _ReplaceContent = function() {
+            js_news = $.GetContextPanel().FindChildTraverse("JsNewsContainer");
+            if (!js_news) {
+                return;
+            }
+
+            _Destroy();
+
+            original_transform = js_news.style.transform || 'none';
+            original_visibility = js_news.style.visibility || 'visible';
+
+            js_news.style.transform = original_transform;
+            js_news.style.visibility = 'visible';
+
+            hidden_children = [];
+
+            for (var i = 0; i < js_news.GetChildCount(); i++) {
+                var child = js_news.GetChild(i);
+                if (!child || child.id === 'PastheticSimpleServerBrowser') {
+                    continue;
+                }
+
+                hidden_children.push({
+                    panel: child,
+                    visibility: child.style.visibility || 'visible',
+                    opacity: child.style.opacity || '1'
+                });
+
+                child.style.visibility = 'collapse';
+                child.style.opacity = '0';
+            }
+        };
+
+        var _RestoreContent = function() {
+            for (var i = 0; i < hidden_children.length; i++) {
+                var item = hidden_children[i];
+                if (item.panel && item.panel.IsValid()) {
+                    item.panel.style.visibility = item.visibility;
+                    item.panel.style.opacity = item.opacity;
+                }
+            }
+
+            hidden_children = [];
+        };
+
         return {
             create: _Create,
             destroy: _Destroy,
+            replace: _ReplaceContent,
+            restore_content: _RestoreContent
         };
     ]], 'CSGOMainMenu')()
 
@@ -420,10 +470,12 @@ function M.start(deps)
     function api.create()
         local options = get_options()
         local logo_url = get_logo_url()
+        local server_browser_enabled = array_contains(options, OPTION_SERVER_BROWSER)
+        local news_mode = server_browser_enabled and 'replace' or (array_contains(options, OPTION_NEWS) and 'hide' or 'none')
         local settings = {
             cslogo = array_contains(options, OPTION_CSLOGO),
             logo_url = logo_url,
-            news = array_contains(options, OPTION_NEWS) or array_contains(options, OPTION_SERVER_BROWSER),
+            news_mode = news_mode,
             background = array_contains(options, OPTION_BACKGROUND),
             stats = array_contains(options, OPTION_STATS),
             watch = array_contains(options, OPTION_WATCH),
@@ -442,13 +494,20 @@ function M.start(deps)
             state.logo_url = settings.logo_url
         end
 
-        if settings.news ~= state.news then
-            if settings.news then
-                news_container.create()
-            else
+        if settings.news_mode ~= state.news_mode then
+            if state.news_mode == 'hide' then
                 news_container.destroy()
+            elseif state.news_mode == 'replace' then
+                news_container.restore_content()
             end
-            state.news = settings.news
+
+            if settings.news_mode == 'hide' then
+                news_container.create()
+            elseif settings.news_mode == 'replace' then
+                news_container.replace()
+            end
+
+            state.news_mode = settings.news_mode
         end
 
         if settings.background ~= state.background then

@@ -419,7 +419,13 @@ local function update_panel_visibility()
         return false
     end
 
-    local enabled = is_enabled() == true
+    local in_main_menu = true
+    if type(server_browser.is_main_menu) == 'function' then
+        local ok, result = pcall(server_browser.is_main_menu)
+        in_main_menu = ok and result == true
+    end
+
+    local enabled = is_enabled() == true and in_main_menu
 
     if enabled and not panel_visible then
         server_browser.create(visible_servers())
@@ -431,6 +437,10 @@ local function update_panel_visibility()
         server_browser.destroy()
         panel_visible = false
         return true
+    end
+
+    if enabled and panel_visible and type(server_browser.update_hittest) == 'function' then
+        pcall(server_browser.update_hittest)
     end
 
     return enabled
@@ -473,6 +483,7 @@ server_browser = panorama.loadstring([[
 
     var PANEL_ID = 'PastheticSimpleServerBrowser';
     var SHOW_LAYOUT_GUIDES = false;
+    var hostPanel = null;
 
     var C = {
         panel: 'rgba(8, 10, 14, 0.70)',
@@ -485,10 +496,178 @@ server_browser = panorama.loadstring([[
     };
 
     function cleanup() {
-        var old = mainMenu.FindChildTraverse(PANEL_ID);
+        var old = (hostPanel || mainMenu).FindChildTraverse(PANEL_ID);
         if (old && old.IsValid()) {
             old.DeleteAsync(0.0);
         }
+    }
+
+    function resolveHostPanel() {
+        var news = mainMenu.FindChildTraverse('JsNewsContainer');
+
+        if (news && news.IsValid()) {
+            hostPanel = news;
+        } else {
+            hostPanel = mainMenu;
+        }
+
+        return hostPanel;
+    }
+
+    function getNewsPanel() {
+        var news = mainMenu.FindChildTraverse('JsNewsContainer');
+        return news && news.IsValid() ? news : null;
+    }
+
+    function isPanelActuallyVisible(panel) {
+        if (!panel || !panel.IsValid()) {
+            return false;
+        }
+
+        var current = panel;
+        while (current && current.IsValid()) {
+            try {
+                if (current.visible === false) {
+                    return false;
+                }
+            } catch (e) {}
+
+            try {
+                if (current.style.visibility === 'collapse' || current.style.opacity === '0') {
+                    return false;
+                }
+            } catch (e) {}
+
+            current = current.GetParent();
+        }
+
+        return true;
+    }
+
+    function isPanelVisible(panel) {
+        if (!panel || !panel.IsValid()) {
+            return false;
+        }
+
+        try {
+            if (panel.visible === false) {
+                return false;
+            }
+        } catch (e) {}
+
+        try {
+            if (panel.style.visibility === 'collapse' || panel.style.opacity === '0') {
+                return false;
+            }
+        } catch (e) {}
+
+        return true;
+    }
+
+    function getPanelRect(panel) {
+        var x = 0;
+        var y = 0;
+
+        try {
+            var pos = panel.GetPositionWithinWindow();
+            if (pos) {
+                x = Number(pos.x !== undefined ? pos.x : pos[0]) || 0;
+                y = Number(pos.y !== undefined ? pos.y : pos[1]) || 0;
+            }
+        } catch (e) {
+            var current = panel;
+            while (current && current.IsValid()) {
+                x += Number(current.actualxoffset) || 0;
+                y += Number(current.actualyoffset) || 0;
+                current = current.GetParent();
+            }
+        }
+
+        return {
+            x: x,
+            y: y,
+            w: Number(panel.actuallayoutwidth || panel.actualwidth) || 0,
+            h: Number(panel.actuallayoutheight || panel.actualheight) || 0
+        };
+    }
+
+    function rectsOverlap(a, b) {
+        if (a.w <= 0 || a.h <= 0 || b.w <= 0 || b.h <= 0) {
+            return false;
+        }
+
+        return a.x < b.x + b.w &&
+            a.x + a.w > b.x &&
+            a.y < b.y + b.h &&
+            a.y + a.h > b.y;
+    }
+
+    function isCoveredByUpperLayer(rootPanel) {
+        var targetRect = getPanelRect(rootPanel);
+        var current = rootPanel;
+        var parent = current.GetParent();
+
+        while (parent && parent.IsValid()) {
+            var seenCurrent = false;
+
+            for (var i = 0; i < parent.GetChildCount(); i++) {
+                var child = parent.GetChild(i);
+
+                if (child === current) {
+                    seenCurrent = true;
+                    continue;
+                }
+
+                if (!seenCurrent || !child || child === rootPanel || child.id === PANEL_ID) {
+                    continue;
+                }
+
+                if (isPanelActuallyVisible(child) && rectsOverlap(getPanelRect(child), targetRect)) {
+                    return true;
+                }
+            }
+
+            if (parent === mainMenu) {
+                break;
+            }
+
+            current = parent;
+            parent = current.GetParent();
+        }
+
+        return false;
+    }
+
+    function setBrowserHitTest(rootPanel, enabled) {
+        var value = enabled ? 'true' : 'false';
+
+        try { rootPanel.hittest = enabled; } catch (e) {}
+        try { rootPanel.hittestchildren = enabled; } catch (e) {}
+        try { rootPanel.style.hittest = value; } catch (e) {}
+        try { rootPanel.style.hittestchildren = value; } catch (e) {}
+    }
+
+    function updateHitTest() {
+        var rootPanel = (hostPanel || mainMenu).FindChildTraverse(PANEL_ID);
+        if (!rootPanel || !rootPanel.IsValid()) {
+            return false;
+        }
+
+        var enabled = !isCoveredByUpperLayer(rootPanel);
+        setBrowserHitTest(rootPanel, enabled);
+        return enabled;
+    }
+
+    function isMainMenu() {
+        try {
+            if (typeof GameStateAPI !== 'undefined' &&
+                GameStateAPI.IsLocalPlayerPlayingMatch &&
+                GameStateAPI.IsLocalPlayerPlayingMatch()) {
+                return false;
+            }
+        } catch (e) {}
+
+        return true;
     }
 
     function panel(parent, id) {
@@ -661,13 +840,16 @@ server_browser = panorama.loadstring([[
     function create(servers) {
         cleanup();
 
-        var rootPanel = panel(mainMenu, PANEL_ID);
+        var host = resolveHostPanel();
+        var news = getNewsPanel();
+        var insideNews = news && host === news;
+        var rootPanel = panel(host, PANEL_ID);
         rootPanel.style.width = '719px';
         rootPanel.style.height = '730px';
         rootPanel.style.horizontalAlign = 'left';
         rootPanel.style.verticalAlign = 'top';
-        rootPanel.style.marginLeft = '130px';
-        rootPanel.style.marginTop = '55px';
+        rootPanel.style.marginLeft = insideNews ? '0px' : '130px';
+        rootPanel.style.marginTop = insideNews ? '0px' : '55px';
         rootPanel.style.flowChildren = 'down';
         rootPanel.style.overflow = 'squish scroll';
         rootPanel.style.padding = '20px 22px';
@@ -676,11 +858,18 @@ server_browser = panorama.loadstring([[
         rootPanel.style.borderRadius = '0px';
         rootPanel.style.boxShadow = 'none';
 
+        if (news && !insideNews) {
+            host.MoveChildBefore(rootPanel, news);
+        } else if (!insideNews) {
+            host.MoveChildBefore(rootPanel, host.GetChild(0));
+        }
+
         render(servers);
+        updateHitTest();
     }
 
     function render(servers) {
-        var rootPanel = mainMenu.FindChildTraverse(PANEL_ID);
+        var rootPanel = (hostPanel || mainMenu).FindChildTraverse(PANEL_ID);
 
         if (!rootPanel) {
             create(servers);
@@ -692,11 +881,15 @@ server_browser = panorama.loadstring([[
         for (var i = 0; i < servers.length; i++) {
             makeServer(rootPanel, servers[i], i, i === servers.length - 1);
         }
+
+        updateHitTest();
     }
 
     return {
         create: create,
         render: render,
+        update_hittest: updateHitTest,
+        is_main_menu: isMainMenu,
         destroy: cleanup
     };
 ]], 'CSGOMainMenu')()
