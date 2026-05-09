@@ -275,7 +275,7 @@ function M.start(deps)
             }
 
             if (height > 0) {
-                layer.style.height = (height + 100) + "px";
+                layer.style.height = (height + 150) + "px";
             } else {
                 layer.style.height = "110%";
             }
@@ -283,7 +283,7 @@ function M.start(deps)
             layer.style.horizontalAlign = "left";
             layer.style.verticalAlign = "top";
             layer.style.marginLeft = "-130px";
-            layer.style.marginTop = "-50px";
+            layer.style.marginTop = "-100px";
         };
 
         var _ChangeBackground = function(imageUrl) {
