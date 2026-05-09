@@ -294,10 +294,10 @@ function M.start(deps)
             var host = _FindBackgroundHost();
             var layer = $.CreatePanel("Panel", host, BACKGROUND_LAYER_ID);
             layer.style.width = "125%";
-            layer.style.height = "100%";
+            layer.style.height = "110%";
             layer.style.horizontalAlign = "left";
-            layer.style.verticalAlign = "center";
-            layer.style.marginLeft = "-100px";
+            layer.style.verticalAlign = "bottom";
+            layer.style.marginLeft = "-150px";
             layer.style.backgroundImage = 'url("' + imageUrl + '")';
             layer.style.backgroundPosition = "center";
             layer.style.backgroundSize = "cover";
