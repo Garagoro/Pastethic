@@ -269,7 +269,7 @@ function M.start(deps)
             var height = Number(host.actuallayoutheight || host.actualheight) || 0;
 
             if (width > 0) {
-                layer.style.width = (width + 60) + "px";
+                layer.style.width = (width + 110) + "px";
             } else {
                 layer.style.width = "105%";
             }
@@ -282,7 +282,7 @@ function M.start(deps)
 
             layer.style.horizontalAlign = "left";
             layer.style.verticalAlign = "top";
-            layer.style.marginLeft = "-60px";
+            layer.style.marginLeft = "-110px";
             layer.style.marginTop = "-50px";
         };
 
