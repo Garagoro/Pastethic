@@ -101,7 +101,7 @@ function M.start(deps)
                         oncancel="MainMenu.OnEscapeKeyPressed();"
                         onmouseover="UiToolkitAPI.ShowTextTooltip('main_menu', 't.me/debugoverlay');"
                         onmouseout="UiToolkitAPI.HideTextTooltip();">
-                        <Image textureheight="42" texturewidth="-1" src="${imageUrl}"
+                        <Image textureheight="55" texturewidth="-1" src="${imageUrl}"
                             style="horizontal-align: center; vertical-align: center;" />
                     </RadioButton>
                 </Panel>
