@@ -13,6 +13,9 @@ local panorama = deps.panorama or panorama
 local is_enabled = deps.is_enabled or function()
     return true
 end
+local is_background_enabled = deps.is_background_enabled or function()
+    return false
+end
 
 local MODULE_UNLOAD_KEY = '__pasthetic_server_browser_unload'
 local previous_unload = rawget(_G, MODULE_UNLOAD_KEY)
@@ -22,7 +25,8 @@ if type(previous_unload) == 'function' then
 end
 
 local state = {
-    alive = true
+    alive = true,
+    background_enabled = nil
 }
 
 local ok_steamworks, steamworks = pcall(require, 'gamesense/steamworks')
@@ -426,17 +430,28 @@ local function update_panel_visibility()
     end
 
     local enabled = is_enabled() == true and in_main_menu
+    local background_enabled = is_background_enabled() == true
 
     if enabled and not panel_visible then
-        server_browser.create(visible_servers())
+        server_browser.create(visible_servers(), background_enabled)
         panel_visible = true
+        state.background_enabled = background_enabled
         return true
     end
 
     if not enabled and panel_visible then
         server_browser.destroy()
         panel_visible = false
+        state.background_enabled = nil
         return true
+    end
+
+    if enabled and panel_visible and state.background_enabled ~= background_enabled then
+        if type(server_browser.set_background_enabled) == 'function' then
+            pcall(server_browser.set_background_enabled, background_enabled)
+        end
+
+        state.background_enabled = background_enabled
     end
 
     if enabled and panel_visible and type(server_browser.update_hittest) == 'function' then
@@ -675,6 +690,17 @@ server_browser = panorama.loadstring([[
         return $.CreatePanel('Panel', parent, id);
     }
 
+    function getPanelBackground(backgroundEnabled) {
+        return backgroundEnabled ? 'rgba(0,0,0,0)' : C.panel;
+    }
+
+    function setPanelBackground(backgroundEnabled) {
+        var rootPanel = (hostPanel || mainMenu).FindChildTraverse(PANEL_ID);
+        if (rootPanel && rootPanel.IsValid()) {
+            rootPanel.style.backgroundColor = getPanelBackground(backgroundEnabled === true);
+        }
+    }
+
     function label(parent, id, text, color, size, weight) {
         var el = $.CreatePanel('Label', parent, id);
         el.text = text || '';
@@ -831,7 +857,7 @@ server_browser = panorama.loadstring([[
         }
     }
 
-    function create(servers) {
+    function create(servers, backgroundEnabled) {
         cleanup();
 
         var host = resolveHostPanel();
@@ -847,7 +873,7 @@ server_browser = panorama.loadstring([[
         rootPanel.style.flowChildren = 'down';
         rootPanel.style.overflow = 'clip';
         rootPanel.style.padding = '20px 22px';
-        rootPanel.style.backgroundColor = C.panel;
+        rootPanel.style.backgroundColor = getPanelBackground(backgroundEnabled === true);
         rootPanel.style.border = '0px solid rgba(0,0,0,0)';
         rootPanel.style.borderRadius = '0px';
         rootPanel.style.boxShadow = 'none';
@@ -884,6 +910,7 @@ server_browser = panorama.loadstring([[
         render: render,
         update_hittest: updateHitTest,
         is_main_menu: isMainMenu,
+        set_background_enabled: setPanelBackground,
         destroy: cleanup
     };
 ]], 'CSGOMainMenu')()

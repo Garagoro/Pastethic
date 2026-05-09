@@ -398,6 +398,9 @@ function M.start(ctx)
             panorama = panorama,
             is_enabled = function()
                 return array_contains(get_panorama_options(), 'Server Browser')
+            end,
+            is_background_enabled = function()
+                return array_contains(get_panorama_options(), 'Change background')
             end
         })
     end)
