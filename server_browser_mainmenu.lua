@@ -848,7 +848,7 @@ server_browser = panorama.loadstring([[
         var news = getNewsPanel();
         var insideNews = news && host === news;
         var rootPanel = panel(host, PANEL_ID);
-        rootPanel.style.width = '719px';
+        rootPanel.style.width = '649px';
         rootPanel.style.height = '1000px';
         rootPanel.style.horizontalAlign = 'left';
         rootPanel.style.verticalAlign = 'top';
