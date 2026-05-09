@@ -682,6 +682,8 @@ server_browser = panorama.loadstring([[
         el.style.fontWeight = weight || 'normal';
         el.style.textOverflow = 'ellipsis';
         el.style.whiteSpace = 'nowrap';
+        try { el.hittest = false; } catch (e) {}
+        try { el.hittestchildren = false; } catch (e) {}
         return el;
     }
 
@@ -713,17 +715,19 @@ server_browser = panorama.loadstring([[
 
     function makeConnectText(parent, id, address) {
         var btn = $.CreatePanel('Button', parent, id);
-        btn.style.height = '32px';
-        btn.style.minWidth = '118px';
+        btn.style.width = '118px';
+        btn.style.height = '18px';
+        btn.style.verticalAlign = 'center';
         btn.style.padding = '0px';
         btn.style.backgroundColor = 'rgba(0,0,0,0)';
         btn.style.border = '0px solid rgba(0,0,0,0)';
 
         var text = label(btn, id + 'Text', address, C.connect, '13px', 'normal');
-        text.style.horizontalAlign = 'right';
+        text.style.horizontalAlign = 'left';
         text.style.verticalAlign = 'center';
-        text.style.textAlign = 'right';
+        text.style.textAlign = 'left';
         text.style.width = '100%';
+        text.style.height = '18px';
 
         btn.SetPanelEvent('onmouseover', function() {
             text.style.color = C.connectHover;
@@ -845,13 +849,13 @@ server_browser = panorama.loadstring([[
         var insideNews = news && host === news;
         var rootPanel = panel(host, PANEL_ID);
         rootPanel.style.width = '719px';
-        rootPanel.style.height = '730px';
+        rootPanel.style.height = '1000px';
         rootPanel.style.horizontalAlign = 'left';
         rootPanel.style.verticalAlign = 'top';
         rootPanel.style.marginLeft = insideNews ? '0px' : '130px';
         rootPanel.style.marginTop = insideNews ? '0px' : '55px';
         rootPanel.style.flowChildren = 'down';
-        rootPanel.style.overflow = 'squish scroll';
+        rootPanel.style.overflow = 'clip';
         rootPanel.style.padding = '20px 22px';
         rootPanel.style.backgroundColor = C.panel;
         rootPanel.style.border = '0px solid rgba(0,0,0,0)';
