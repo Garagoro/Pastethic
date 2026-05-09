@@ -96,11 +96,13 @@ function M.start(deps)
             `<root>
                 <Panel class="mainmenu-navbar__btn-small mainmenu-navbar__btn-home MainMenuModeOnly">
                     <RadioButton id="main_menu"
+                        style="width: 100%; height: 100%; horizontal-align: center; vertical-align: center;"
                         onactivate="MainMenu.OnHomeButtonPressed(); $.DispatchEvent( 'PlaySoundEffect', 'UIPanorama.mainmenu_press_home', 'MOUSE' ); $.DispatchEvent('PlayMainMenuMusic', true, true); GameInterfaceAPI.SetSettingString('panorama_play_movie_ambient_sound', '1');"
                         oncancel="MainMenu.OnEscapeKeyPressed();"
                         onmouseover="UiToolkitAPI.ShowTextTooltip('main_menu', 't.me/debugoverlay');"
                         onmouseout="UiToolkitAPI.HideTextTooltip();">
-                        <Image textureheight="85" texturewidth="-1" src="${imageUrl}" />
+                        <Image textureheight="85" texturewidth="-1" src="${imageUrl}"
+                            style="horizontal-align: center; vertical-align: center;" />
                     </RadioButton>
                 </Panel>
             </root>`,
