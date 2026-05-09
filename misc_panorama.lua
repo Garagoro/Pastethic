@@ -234,6 +234,32 @@ function M.start(deps)
     ]], 'CSGOMainMenu')()
 
     local background = panorama.loadstring([[
+        var BACKGROUND_LAYER_ID = "PastheticBackgroundLayer";
+
+        var _FindBackgroundHost = function() {
+            var ids = [
+                "MainMenuBackground",
+                "MainMenu",
+                "MainMenuContainerPanel"
+            ];
+
+            for (var i = 0; i < ids.length; i++) {
+                var panel = $.GetContextPanel().FindChildTraverse(ids[i]);
+                if (panel) {
+                    return panel;
+                }
+            }
+
+            return $.GetContextPanel();
+        };
+
+        var _DestroyBackgroundLayer = function() {
+            var layer = $.GetContextPanel().FindChildTraverse(BACKGROUND_LAYER_ID);
+            if (layer) {
+                layer.DeleteAsync(0.0);
+            }
+        };
+
         var _ChangeBackground = function(imageUrl) {
             var movieElements = [
                 "MainMenuMovie",
@@ -249,6 +275,8 @@ function M.start(deps)
                 }
             });
 
+            _DestroyBackgroundLayer();
+
             var bgElements = [
                 "MainMenuBackground",
                 "MainMenu",
@@ -258,13 +286,31 @@ function M.start(deps)
             bgElements.forEach(function(id) {
                 var panel = $.GetContextPanel().FindChildTraverse(id);
                 if (panel) {
-                    panel.style.backgroundImage = 'url("' + imageUrl + '")';
-                    panel.style.backgroundPosition = 'center';
-                    panel.style.backgroundSize = 'cover';
-                    panel.style.backgroundRepeat = 'no-repeat';
+                    panel.style.backgroundImage = 'none';
                     panel.style.opacity = "1";
                 }
             });
+
+            var host = _FindBackgroundHost();
+            var layer = $.CreatePanel("Panel", host, BACKGROUND_LAYER_ID);
+            layer.style.width = "125%";
+            layer.style.height = "100%";
+            layer.style.horizontalAlign = "left";
+            layer.style.verticalAlign = "center";
+            layer.style.marginLeft = "-100px";
+            layer.style.backgroundImage = 'url("' + imageUrl + '")';
+            layer.style.backgroundPosition = "center";
+            layer.style.backgroundSize = "cover";
+            layer.style.backgroundRepeat = "no-repeat";
+            layer.style.transform = "scaleX(0.9)";
+            layer.style.opacity = "1";
+
+            try { layer.hittest = false; } catch (e) {}
+            try { layer.hittestchildren = false; } catch (e) {}
+
+            try {
+                host.MoveChildBefore(layer, host.GetChild(0));
+            } catch (e) {}
         };
 
         var _RestoreDefault = function() {
@@ -294,6 +340,8 @@ function M.start(deps)
                     panel.style.backgroundImage = 'none';
                 }
             });
+
+            _DestroyBackgroundLayer();
         };
 
         return {
