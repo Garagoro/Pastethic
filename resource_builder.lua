@@ -273,6 +273,7 @@ local resource do
                 {
                     'Render', {
                         'World',
+                        'Panorama',
                     }
                 },
 
@@ -2121,7 +2122,22 @@ local resource do
             render_we.misc = misc_section
         end
 
+        local panorama_section = {} do
+            panorama_section.cleanup = menu.new(ui.new_multiselect, "AA", "Anti-aimbot angles", new_key("Main menu cleanup", "we_panorama"),
+                'CS:GO Logo',
+                'Remove News and Shop',
+                'Server Browser',
+                'Change background',
+                'Remove stats button',
+                'Remove watch button',
+                'Remove sidebar',
+                'Remove model in mainmenu'
+            )
+            render_we.panorama = panorama_section
+        end
+
         register_config_items("World", "world", render_we.world)
+        register_config_items("Panorama", "panorama", render_we.panorama)
         register_config_items("Miscellaneous", "misc", render_we.misc)
 
         resource.render_we = render_we
@@ -2153,6 +2169,7 @@ local resource do
                 {
                     'Render', {
                         'World',
+                        'Panorama',
                     }
                 },
             }
@@ -3156,8 +3173,14 @@ local resource do
                 menu_logic.set(ref.ragdolls.remove, true)
 
             end
+            -- Render - Panorama
+            if category == 11 then
+                local ref = resource.render_we.panorama
+
+                menu_logic.set(ref.cleanup, true)
+            end
             -- Configurations
-            if category == 12 then
+            if category == 13 then
                 menu_logic.set(config.categories, true)
 
                 menu_logic.set(config.list, true)

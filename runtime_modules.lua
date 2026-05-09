@@ -17,6 +17,7 @@ function M.start(ctx)
     local pasthetic_misc_console_filter = require_pasthetic_module 'pasthetic/misc_console_filter'
     local pasthetic_misc_sync_ragebot_hotkeys = require_pasthetic_module 'pasthetic/misc_sync_ragebot_hotkeys'
     local pasthetic_misc_reveal_enemy_team_chat = require_pasthetic_module 'pasthetic/misc_reveal_enemy_team_chat'
+    local pasthetic_misc_panorama = require_pasthetic_module 'pasthetic/misc_panorama'
     local pasthetic_clantag = require_pasthetic_module 'pasthetic/clantag'
     local pasthetic_automatic_purchase = require_pasthetic_module 'pasthetic/automatic_purchase'
     local pasthetic_anim_breaker = require_pasthetic_module 'pasthetic/anim_breaker'
@@ -27,6 +28,7 @@ function M.start(ctx)
     local pasthetic_item_crash_fix = require_pasthetic_module 'pasthetic/item_crash_fix'
     local pasthetic_world_enhancer = require_pasthetic_module 'pasthetic/world_enhancer'
     local pasthetic_world_ragdolls = require_pasthetic_module 'pasthetic/world_ragdolls'
+    local pasthetic_server_browser_mainmenu = require_pasthetic_module 'pasthetic/server_browser_mainmenu'
 
     local script = ctx.script
     local resource = ctx.resource
@@ -63,6 +65,36 @@ function M.start(ctx)
     local statement = ctx.statement
     local ffi = ctx.ffi
     local materialsystem = ctx.materialsystem or materialsystem
+    local has_update = ctx.has_update or function()
+        return false
+    end
+
+    local function array_contains(array, value)
+        if type(array) ~= 'table' then
+            return false
+        end
+
+        for i = 1, #array do
+            if array[i] == value then
+                return true
+            end
+        end
+
+        return false
+    end
+
+    local function get_panorama_options()
+        if resource == nil or resource.render_we == nil or resource.render_we.panorama == nil then
+            return {}
+        end
+
+        local cleanup = resource.render_we.panorama.cleanup
+        if cleanup == nil or type(cleanup.get) ~= 'function' then
+            return {}
+        end
+
+        return cleanup:get()
+    end
 
     local main do
         local rage do
@@ -236,6 +268,26 @@ function M.start(ctx)
             })
             end)
 
+            diagnostics:start('misc_panorama', function()
+                local api = pasthetic_misc_panorama.start({
+                    panorama = panorama,
+                    has_update = has_update,
+                    get_options = function()
+                        return get_panorama_options()
+                    end
+                })
+
+                client.set_event_callback('paint_ui', function()
+                    api.create()
+                end)
+
+                client.set_event_callback('shutdown', function()
+                    api.shutdown()
+                end)
+
+                return api
+            end)
+
             diagnostics:start('clantag', function()
                 return pasthetic_clantag.start({
                     resource = resource,
@@ -335,6 +387,18 @@ function M.start(ctx)
             resource = resource,
             entity = entity,
             utils = utils
+        })
+    end)
+
+    diagnostics:start('server_browser_mainmenu', function()
+        return pasthetic_server_browser_mainmenu.start({
+            ffi = ffi,
+            client = client,
+            globals = globals,
+            panorama = panorama,
+            is_enabled = function()
+                return array_contains(get_panorama_options(), 'Server Browser')
+            end
         })
     end)
 

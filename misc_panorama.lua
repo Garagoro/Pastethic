@@ -2,11 +2,15 @@ local M = {}
 
 local OPTION_CSLOGO = 'CS:GO Logo'
 local OPTION_NEWS = 'Remove News and Shop'
+local OPTION_SERVER_BROWSER = 'Server Browser'
 local OPTION_BACKGROUND = 'Change background'
 local OPTION_STATS = 'Remove stats button'
 local OPTION_WATCH = 'Remove watch button'
 local OPTION_SIDEBAR = 'Remove sidebar'
 local OPTION_MODEL = 'Remove model in mainmenu'
+
+local LOGO_OUTDATED_URL = 'https://raw.githubusercontent.com/Garagoro/Pasthetic/refs/heads/main/logo%202.png'
+local LOGO_DEFAULT_URL = 'https://raw.githubusercontent.com/Garagoro/Pasthetic/refs/heads/main/logo%203.png'
 
 local function array_contains(array, value)
     if type(array) ~= 'table' then
@@ -25,9 +29,33 @@ end
 function M.start(deps)
     local panorama = assert(deps.panorama, 'misc_panorama: panorama dependency is required')
     local get_options = assert(deps.get_options, 'misc_panorama: get_options dependency is required')
+    local has_update = deps.has_update or function()
+        return false
+    end
+
+    local creator_logo_url = deps.creator_logo_url
+    if creator_logo_url == nil then
+        local ok, creator_logo = pcall(require, 'pasthetic/creator_logo')
+        if ok then
+            if type(creator_logo) == 'string' then
+                creator_logo_url = creator_logo
+            elseif type(creator_logo) == 'table' then
+                creator_logo_url = creator_logo.url or (type(creator_logo.get_url) == 'function' and creator_logo.get_url())
+            end
+        end
+    end
+
+    local function get_logo_url()
+        if type(creator_logo_url) == 'string' and creator_logo_url ~= '' then
+            return creator_logo_url
+        end
+
+        return has_update() and LOGO_OUTDATED_URL or LOGO_DEFAULT_URL
+    end
 
     local state = {
         cslogo = false,
+        logo_url = nil,
         news = false,
         background = false,
         stats = false,
@@ -42,7 +70,7 @@ function M.start(deps)
         var original_transform = null;
         var original_visibility = null;
 
-        var _Create = function() {
+        var _Create = function(imageUrl) {
             cs_logo = $.GetContextPanel().FindChildTraverse("MainMenuNavBarHome");
             if (!cs_logo) {
                 return;
@@ -72,7 +100,7 @@ function M.start(deps)
                         oncancel="MainMenu.OnEscapeKeyPressed();"
                         onmouseover="UiToolkitAPI.ShowTextTooltip('main_menu', 't.me/debugoverlay');"
                         onmouseout="UiToolkitAPI.HideTextTooltip();">
-                        <Image textureheight="128" texturewidth="-1" src="https://raw.githubusercontent.com/uwukson4800/paranoia-gs/e9d3def09892ecebff61dc5fbe21837559b88392/logo.svg" />
+                        <Image textureheight="128" texturewidth="-1" src="${imageUrl}" />
                     </RadioButton>
                 </Panel>
             </root>`,
@@ -389,9 +417,11 @@ function M.start(deps)
 
     function api.create()
         local options = get_options()
+        local logo_url = get_logo_url()
         local settings = {
             cslogo = array_contains(options, OPTION_CSLOGO),
-            news = array_contains(options, OPTION_NEWS),
+            logo_url = logo_url,
+            news = array_contains(options, OPTION_NEWS) or array_contains(options, OPTION_SERVER_BROWSER),
             background = array_contains(options, OPTION_BACKGROUND),
             stats = array_contains(options, OPTION_STATS),
             watch = array_contains(options, OPTION_WATCH),
@@ -399,13 +429,15 @@ function M.start(deps)
             model = array_contains(options, OPTION_MODEL)
         }
 
-        if settings.cslogo ~= state.cslogo then
+        if settings.cslogo ~= state.cslogo or (settings.cslogo and settings.logo_url ~= state.logo_url) then
             if settings.cslogo then
-                cs_logo.create()
+                cs_logo.destroy()
+                cs_logo.create(settings.logo_url)
             else
                 cs_logo.destroy()
             end
             state.cslogo = settings.cslogo
+            state.logo_url = settings.logo_url
         end
 
         if settings.news ~= state.news then
