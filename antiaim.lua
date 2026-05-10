@@ -165,6 +165,196 @@ local antiaim = { } do
         cvar = cvar
     })
 
+    local record_disruptor = assert(
+        deps.record_disruptor,
+        'antiaim: record_disruptor dependency is required'
+    ).new({
+        resource = resource,
+        entity = entity,
+        client = client,
+        globals = globals,
+        vector = vector,
+        utils = utils,
+        bit = bit,
+        software = software
+    })
+
+    local shot_antibrute = { } do
+        local active = {
+            expire_time = 0,
+            side = 0,
+            strength = 0,
+            shooter = nil,
+            shots = 0,
+            last_time = 0
+        }
+
+        local HIT_LIFE = 1.25
+        local CLOSE_DISTANCE = 12
+        local MAX_DISTANCE = 96
+
+        local function reset()
+            active.expire_time = 0
+            active.side = 0
+            active.strength = 0
+            active.shooter = nil
+            active.shots = 0
+            active.last_time = 0
+        end
+
+        local function get_head_position(player)
+            local x, y, z = entity.hitbox_position(player, 0)
+
+            if x ~= nil then
+                return vector(x, y, z)
+            end
+
+            x, y, z = utils.get_eye_position(player)
+
+            if x ~= nil then
+                return vector(x, y, z)
+            end
+
+            return nil
+        end
+
+        local function get_eye_position(player)
+            local x, y, z = utils.get_eye_position(player)
+
+            if x ~= nil then
+                return vector(x, y, z)
+            end
+
+            return get_head_position(player)
+        end
+
+        local function get_active_strength()
+            if active.expire_time <= globals.realtime() then
+                return 0
+            end
+
+            local me = entity.get_local_player()
+
+            if me == nil or not entity.is_alive(me) then
+                reset()
+                return 0
+            end
+
+            return active.strength
+        end
+
+        local function get_offset(value, range)
+            value = value or 0
+
+            if value <= 0 then
+                return 0
+            end
+
+            local strength = get_active_strength()
+
+            if strength <= 0 or active.side == 0 then
+                return 0
+            end
+
+            local amount = math.floor(range * value * 0.01 * strength + 0.5)
+
+            if amount <= 0 then
+                return 0
+            end
+
+            return active.side * amount
+        end
+
+        function shot_antibrute:get_yaw_offset(value, yaw_left, yaw_right)
+            local range = math.max(
+                math.abs(yaw_left or 0),
+                math.abs(yaw_right or 0),
+                35
+            )
+
+            return get_offset(value, range)
+        end
+
+        function shot_antibrute:get_jitter_offset(value, jitter_offset, jitter_min, jitter_max)
+            local range = math.max(
+                math.abs(jitter_offset or 0),
+                math.abs((jitter_max or 0) - (jitter_min or 0)) * 0.5,
+                30
+            )
+
+            return get_offset(value, range)
+        end
+
+        function shot_antibrute:reset()
+            reset()
+        end
+
+        function shot_antibrute:on_bullet_impact(e)
+            local me = entity.get_local_player()
+
+            if me == nil or not entity.is_alive(me) then
+                reset()
+                return
+            end
+
+            local shooter = client.userid_to_entindex(e.userid)
+
+            if shooter == nil or shooter == me then
+                return
+            end
+
+            if not entity.is_enemy(shooter) or not entity.is_alive(shooter) then
+                return
+            end
+
+            local start = get_eye_position(shooter)
+            local head = get_head_position(me)
+
+            if start == nil or head == nil then
+                return
+            end
+
+            local impact = vector(e.x, e.y, e.z)
+            local line = impact - start
+
+            if line:length2dsqr() < 64 then
+                return
+            end
+
+            local closest = utils.closest_ray_point(start, impact, head, true)
+            local distance = math.sqrt((head - closest):length2dsqr())
+
+            if distance > MAX_DISTANCE then
+                return
+            end
+
+            local head_delta = head - start
+            local cross = line.x * head_delta.y - line.y * head_delta.x
+            local side
+
+            if math.abs(cross) < 1 then
+                side = active.side ~= 0 and -active.side or (utils.random_int(0, 1) == 0 and -1 or 1)
+            else
+                side = cross > 0 and -1 or 1
+            end
+
+            local danger = 1 - utils.clamp(
+                (distance - CLOSE_DISTANCE) / (MAX_DISTANCE - CLOSE_DISTANCE),
+                0,
+                1
+            )
+
+            local now = globals.realtime()
+
+            active.side = side
+            active.strength = 0.35 + danger * 0.65
+            active.shooter = shooter
+            active.shots = now - active.last_time < 4 and active.shots + 1 or 1
+            active.last_time = now
+            active.expire_time = now + HIT_LIFE
+        end
+    end
+
     local safe_head = { } do
         local ref = resource.antiaim.features.safe_head
 
@@ -1118,14 +1308,6 @@ local antiaim = { } do
             local yaw_left = items.yaw_left:get()
             local yaw_right = items.yaw_right:get()
 
-            local yaw_random = items.yaw_random:get()
-
-            local random_left = yaw_left * yaw_random * 0.01
-            local random_right = yaw_right * yaw_random * 0.01
-
-            yaw_left = yaw_left + utils.random_int(-random_left, random_left)
-            yaw_right = yaw_right + utils.random_int(-random_right, random_right)
-
             buffer.yaw = '180'
             buffer.yaw_offset = 0
 
@@ -1144,6 +1326,18 @@ local antiaim = { } do
                     buffer.yaw_left = item_yaw_left:get()
                     buffer.yaw_right = item_yaw_right:get()
                 end
+            end
+
+            local yaw_random = items.yaw_random ~= nil and items.yaw_random:get() or 0
+            local antibrute_offset = shot_antibrute:get_yaw_offset(
+                yaw_random,
+                buffer.yaw_left,
+                buffer.yaw_right
+            )
+
+            if antibrute_offset ~= 0 then
+                buffer.yaw_left = utils.normalize(buffer.yaw_left + antibrute_offset, -180, 180)
+                buffer.yaw_right = utils.normalize(buffer.yaw_right + antibrute_offset, -180, 180)
             end
         end
 
@@ -1170,7 +1364,6 @@ local antiaim = { } do
                 local speed = items.jitter_speed ~= nil and items.jitter_speed:get() or 1
                 local key = tostring(items.yaw_jitter)
                 local jitter_random = items.jitter_random ~= nil and items.jitter_random:get() or 0
-                local random_range = math.floor(math.abs(jitter_max - jitter_min) * 0.5 * jitter_random * 0.01 + 0.5)
 
                 if yaw_jitter == 'Sway' then
                     jitter_offset = preset_runtime:get_sway(
@@ -1200,22 +1393,20 @@ local antiaim = { } do
                     )
                 end
 
-                if random_range > 0 then
-                    jitter_offset = jitter_offset + utils.random_int(
-                        -random_range,
-                        random_range
-                    )
-                end
+                jitter_offset = jitter_offset + shot_antibrute:get_jitter_offset(
+                    jitter_random,
+                    jitter_offset,
+                    jitter_min,
+                    jitter_max
+                )
 
                 if jitter_mode == 'Sway' or jitter_mode == 'Randomized' then
                     yaw_jitter = 'Center'
                 end
             elseif yaw_jitter ~= 'Off' then
-                local random = items.jitter_random:get() * 0.01
-                local random_offset = jitter_offset * random
-
-                jitter_offset = jitter_offset + utils.random_int(
-                    -random_offset, random_offset
+                jitter_offset = jitter_offset + shot_antibrute:get_jitter_offset(
+                    items.jitter_random ~= nil and items.jitter_random:get() or 0,
+                    jitter_offset
                 )
             end
 
@@ -2805,12 +2996,21 @@ local antiaim = { } do
 
     local function on_shutdown()
         fakelag_clone:shutdown()
+        record_disruptor:reset()
         buffer:unset()
     end
 
     local function on_pre_config_save()
         fakelag_clone:shutdown()
+        record_disruptor:reset()
         buffer:unset()
+    end
+
+    local function on_player_death(e)
+        if client.userid_to_entindex(e.userid) == entity.get_local_player() then
+            shot_antibrute:reset()
+            record_disruptor:reset()
+        end
     end
 
     local function on_setup_command(cmd)
@@ -2820,6 +3020,7 @@ local antiaim = { } do
         update_antiaims(cmd)
         update_buffer(cmd)
         predicted_at_targets:update(buffer)
+        record_disruptor:update(cmd, buffer)
 
         buffer:set()
     end
@@ -2832,6 +3033,36 @@ local antiaim = { } do
     utils.event_callback(
         'pre_config_save',
         on_pre_config_save
+    )
+
+    utils.event_callback(
+        'bullet_impact',
+        function(e)
+            shot_antibrute:on_bullet_impact(e)
+        end
+    )
+
+    utils.event_callback(
+        'player_death',
+        on_player_death
+    )
+
+    utils.event_callback(
+        'player_spawn',
+        function(e)
+            if client.userid_to_entindex(e.userid) == entity.get_local_player() then
+                shot_antibrute:reset()
+                record_disruptor:reset()
+            end
+        end
+    )
+
+    utils.event_callback(
+        'round_start',
+        function()
+            shot_antibrute:reset()
+            record_disruptor:reset()
+        end
     )
 
     utils.event_callback(

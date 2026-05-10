@@ -1298,7 +1298,7 @@ local resource do
 
                     items.yaw_random = config_system.push(
                         'Builder', hash 'yaw_random', menu.new(
-                            ui.new_slider, 'AA', 'Anti-aimbot angles', new_key('Random', hash 'yaw_random'), 0, 30, 0, true, '%'
+                            ui.new_slider, 'AA', 'Anti-aimbot angles', new_key('Antibrute delta', hash 'yaw_random'), 0, 100, 0, true, '%'
                         )
                     )
 
@@ -1325,7 +1325,7 @@ local resource do
 
                     items.jitter_random = config_system.push(
                         'Builder', hash 'jitter_random', menu.new(
-                            ui.new_slider, 'AA', 'Anti-aimbot angles', new_key('Randomization', hash 'jitter_random'), 0, 30, 0, true, '%'
+                            ui.new_slider, 'AA', 'Anti-aimbot angles', new_key('Antibrute delta', hash 'jitter_random'), 0, 100, 0, true, '%'
                         )
                     )
 
@@ -1594,6 +1594,20 @@ local resource do
                 )
 
                 features.backtrack_disruptor = backtrack_disruptor
+            end
+
+            local record_disruptor = { } do
+                record_disruptor.enabled = config_system.push(
+                    'Features', 'record_disruptor.enabled', menu.new(
+                        ui.new_checkbox, 'AA', 'Anti-aimbot angles', 'Record disruptor'
+                    )
+                )
+
+                record_disruptor.separator = menu.new(
+                    ui.new_label, 'AA', 'Anti-aimbot angles', '\n'
+                )
+
+                features.record_disruptor = record_disruptor
             end
 
             local safe_head = { } do
@@ -2902,6 +2916,18 @@ local resource do
                     menu_logic.set(ref.backtrack_disruptor.delay_min, true)
                     menu_logic.set(ref.backtrack_disruptor.delay_max, true)
                     menu_logic.set(ref.backtrack_disruptor.separator, true)
+
+                    ::continue::
+                end
+
+                local is_record_disruptor = ref.record_disruptor.enabled:get() do
+                    menu_logic.set(ref.record_disruptor.enabled, true)
+
+                    if not is_record_disruptor then
+                        goto continue
+                    end
+
+                    menu_logic.set(ref.record_disruptor.separator, true)
 
                     ::continue::
                 end

@@ -26,7 +26,8 @@ end
 
 local state = {
     alive = true,
-    background_enabled = nil
+    background_enabled = nil,
+    defer_until = 0
 }
 
 local ok_steamworks, steamworks = pcall(require, 'gamesense/steamworks')
@@ -417,15 +418,42 @@ end
 
 local server_browser
 local panel_visible = false
+local PANEL_DEFER_TIME = 1.0
 
-local function is_on_server()
-    local mapname = globals.mapname()
+local function cancel_pending_query()
+    if steam_query.pending_handle and cancel_server_query then
+        pcall(function()
+            cancel_server_query(steam_query.pending_handle)
+        end)
+    end
 
-    return type(mapname) == 'string' and mapname ~= ''
+    steam_query.pending_address = nil
+    steam_query.pending_handle = nil
+    steam_query.pending_started = 0
+    steam_query.callback = nil
+end
+
+local function safe_destroy_panel()
+    cancel_pending_query()
+
+    if server_browser and type(server_browser.destroy) == 'function' then
+        pcall(server_browser.destroy)
+    end
+
+    panel_visible = false
+    state.background_enabled = nil
 end
 
 local function update_panel_visibility()
     if not state.alive or not server_browser then
+        return false
+    end
+
+    if globals.realtime() < state.defer_until then
+        if panel_visible then
+            safe_destroy_panel()
+        end
+
         return false
     end
 
@@ -435,20 +463,30 @@ local function update_panel_visibility()
         in_main_menu = ok and result == true
     end
 
-    local enabled = is_enabled() == true and not is_on_server() and in_main_menu
+    local enabled = is_enabled() == true and in_main_menu
     local background_enabled = is_background_enabled() == true
 
-    if enabled and not panel_visible then
-        server_browser.create(visible_servers(), background_enabled)
-        panel_visible = true
-        state.background_enabled = background_enabled
-        return true
+    if not enabled then
+        if panel_visible then
+            safe_destroy_panel()
+        else
+            cancel_pending_query()
+        end
+
+        return false
     end
 
-    if not enabled and panel_visible then
-        server_browser.destroy()
-        panel_visible = false
-        state.background_enabled = nil
+    if enabled and not panel_visible then
+        local ok = pcall(server_browser.create, visible_servers(), background_enabled)
+
+        if not ok then
+            safe_destroy_panel()
+            state.defer_until = globals.realtime() + PANEL_DEFER_TIME
+            return false
+        end
+
+        panel_visible = true
+        state.background_enabled = background_enabled
         return true
     end
 
@@ -496,19 +534,12 @@ end
 
 server_browser = panorama.loadstring([[
     var root = $.GetContextPanel();
-    var mainMenu = root;
-
-    while (mainMenu && mainMenu.id !== 'CSGOMainMenu') {
-        mainMenu = mainMenu.GetParent();
-    }
-
-    if (!mainMenu) {
-        mainMenu = root.GetParent() || root;
-    }
+    var mainMenu = null;
 
     var PANEL_ID = 'PastheticSimpleServerBrowser';
     var SHOW_LAYOUT_GUIDES = false;
     var hostPanel = null;
+    var hiddenNewsPanels = [];
 
     var C = {
         panel: 'rgba(8, 10, 14, 0.70)',
@@ -520,28 +551,132 @@ server_browser = panorama.loadstring([[
         guide: 'rgba(255, 80, 80, 0.55)'
     };
 
+    function isValidPanel(panel) {
+        try {
+            return !!(panel && panel.IsValid && panel.IsValid());
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function resolveMainMenu() {
+        var current = root;
+
+        while (isValidPanel(current) && current.id !== 'CSGOMainMenu') {
+            current = current.GetParent();
+        }
+
+        if (isValidPanel(current)) {
+            mainMenu = current;
+            return mainMenu;
+        }
+
+        if (isValidPanel(mainMenu)) {
+            return mainMenu;
+        }
+
+        try {
+            current = root.GetParent();
+        } catch (e) {
+            current = null;
+        }
+
+        mainMenu = isValidPanel(current) ? current : root;
+        return mainMenu;
+    }
+
+    function getSearchRoot() {
+        if (isValidPanel(hostPanel)) {
+            return hostPanel;
+        }
+
+        return resolveMainMenu();
+    }
+
+    function findBrowserRoot() {
+        var searchRoot = getSearchRoot();
+
+        if (!isValidPanel(searchRoot)) {
+            return null;
+        }
+
+        var panel = searchRoot.FindChildTraverse(PANEL_ID);
+        return isValidPanel(panel) ? panel : null;
+    }
+
+    function restoreNewsContent() {
+        for (var i = 0; i < hiddenNewsPanels.length; i++) {
+            var panel = hiddenNewsPanels[i];
+
+            if (isValidPanel(panel)) {
+                try { panel.visible = true; } catch (e) {}
+                try { panel.style.visibility = 'visible'; } catch (e) {}
+                try { panel.style.opacity = '1'; } catch (e) {}
+            }
+        }
+
+        hiddenNewsPanels = [];
+    }
+
+    function hideNewsContent(news, browserRoot) {
+        restoreNewsContent();
+
+        if (!isValidPanel(news)) {
+            return;
+        }
+
+        for (var i = 0; i < news.GetChildCount(); i++) {
+            var child = news.GetChild(i);
+
+            if (!isValidPanel(child) || child === browserRoot || child.id === PANEL_ID) {
+                continue;
+            }
+
+            hiddenNewsPanels.push(child);
+            try { child.visible = false; } catch (e) {}
+            try { child.style.visibility = 'collapse'; } catch (e) {}
+            try { child.style.opacity = '0'; } catch (e) {}
+        }
+    }
+
     function cleanup() {
-        var old = (hostPanel || mainMenu).FindChildTraverse(PANEL_ID);
-        if (old && old.IsValid()) {
+        restoreNewsContent();
+
+        var old = findBrowserRoot();
+
+        if (isValidPanel(old)) {
             old.DeleteAsync(0.0);
         }
     }
 
     function resolveHostPanel() {
-        var news = mainMenu.FindChildTraverse('JsNewsContainer');
+        var menu = resolveMainMenu();
 
-        if (news && news.IsValid()) {
+        if (!isValidPanel(menu)) {
+            hostPanel = root;
+            return hostPanel;
+        }
+
+        var news = menu.FindChildTraverse('JsNewsContainer');
+
+        if (isValidPanel(news)) {
             hostPanel = news;
         } else {
-            hostPanel = mainMenu;
+            hostPanel = menu;
         }
 
         return hostPanel;
     }
 
     function getNewsPanel() {
-        var news = mainMenu.FindChildTraverse('JsNewsContainer');
-        return news && news.IsValid() ? news : null;
+        var menu = resolveMainMenu();
+
+        if (!isValidPanel(menu)) {
+            return null;
+        }
+
+        var news = menu.FindChildTraverse('JsNewsContainer');
+        return isValidPanel(news) ? news : null;
     }
 
     function isPanelActuallyVisible(panel) {
@@ -675,8 +810,8 @@ server_browser = panorama.loadstring([[
     }
 
     function updateHitTest() {
-        var rootPanel = (hostPanel || mainMenu).FindChildTraverse(PANEL_ID);
-        if (!rootPanel || !rootPanel.IsValid()) {
+        var rootPanel = findBrowserRoot();
+        if (!isValidPanel(rootPanel)) {
             return false;
         }
 
@@ -685,15 +820,7 @@ server_browser = panorama.loadstring([[
     }
 
     function isMainMenu() {
-        try {
-            if (typeof GameStateAPI !== 'undefined' &&
-                GameStateAPI.IsLocalPlayerPlayingMatch &&
-                GameStateAPI.IsLocalPlayerPlayingMatch()) {
-                return false;
-            }
-        } catch (e) {}
-
-        return true;
+        return isValidPanel(getNewsPanel());
     }
 
     function panel(parent, id) {
@@ -705,8 +832,8 @@ server_browser = panorama.loadstring([[
     }
 
     function setPanelBackground(backgroundEnabled) {
-        var rootPanel = (hostPanel || mainMenu).FindChildTraverse(PANEL_ID);
-        if (rootPanel && rootPanel.IsValid()) {
+        var rootPanel = findBrowserRoot();
+        if (isValidPanel(rootPanel)) {
             rootPanel.style.backgroundColor = getPanelBackground(backgroundEnabled === true);
         }
     }
@@ -742,9 +869,16 @@ server_browser = panorama.loadstring([[
             }
         } catch (e) {}
 
-        UiToolkitAPI.ShowTextTooltip(sourcePanel.id, copied ? 'connect copied' : command);
+        try {
+            if (sourcePanel && sourcePanel.IsValid && sourcePanel.IsValid()) {
+                UiToolkitAPI.ShowTextTooltip(sourcePanel.id, copied ? 'connect copied' : command);
+            }
+        } catch (e) {}
+
         $.Schedule(1.15, function() {
-            UiToolkitAPI.HideTextTooltip();
+            try {
+                UiToolkitAPI.HideTextTooltip();
+            } catch (e) {}
         });
     }
 
@@ -888,6 +1022,10 @@ server_browser = panorama.loadstring([[
         rootPanel.style.borderRadius = '0px';
         rootPanel.style.boxShadow = 'none';
 
+        if (insideNews) {
+            hideNewsContent(news, rootPanel);
+        }
+
         if (news && !insideNews) {
             host.MoveChildBefore(rootPanel, news);
         } else if (!insideNews) {
@@ -899,9 +1037,9 @@ server_browser = panorama.loadstring([[
     }
 
     function render(servers) {
-        var rootPanel = (hostPanel || mainMenu).FindChildTraverse(PANEL_ID);
+        var rootPanel = findBrowserRoot();
 
-        if (!rootPanel) {
+        if (!isValidPanel(rootPanel)) {
             create(servers);
             return;
         }

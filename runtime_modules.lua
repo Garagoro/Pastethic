@@ -24,6 +24,7 @@ function M.start(ctx)
     local pasthetic_logging_system = require_pasthetic_module 'pasthetic/logging_system'
     local pasthetic_antiaim = require_pasthetic_module 'pasthetic/antiaim'
     local pasthetic_antiaim_predicted_at_targets = require_pasthetic_module 'pasthetic/antiaim_predicted_at_targets'
+    local pasthetic_antiaim_record_disruptor = require_pasthetic_module 'pasthetic/antiaim_record_disruptor'
     local pasthetic_antiaim_presets = require_pasthetic_module 'pasthetic/antiaim_presets'
     local pasthetic_item_crash_fix = require_pasthetic_module 'pasthetic/item_crash_fix'
     local pasthetic_world_enhancer = require_pasthetic_module 'pasthetic/world_enhancer'
@@ -356,6 +357,7 @@ function M.start(ctx)
             toticks = toticks,
             cvar = cvar,
             predicted_at_targets = pasthetic_antiaim_predicted_at_targets,
+            record_disruptor = pasthetic_antiaim_record_disruptor,
             presets = pasthetic_antiaim_presets
         })
     end)
