@@ -33,6 +33,9 @@ function M.start(deps)
     local has_update = deps.has_update or function()
         return false
     end
+    local is_on_server = deps.is_on_server or function()
+        return false
+    end
 
     local creator_logo_url = deps.creator_logo_url
     if creator_logo_url == nil then
@@ -70,6 +73,7 @@ function M.start(deps)
         var cs_logo = null;
         var original_transform = null;
         var original_visibility = null;
+        var PANEL_ID = "PastheticCustomLogoPanel";
 
         var _Create = function(imageUrl) {
             cs_logo = $.GetContextPanel().FindChildTraverse("MainMenuNavBarHome");
@@ -88,7 +92,17 @@ function M.start(deps)
                 return;
             }
 
-            panel = $.CreatePanel("Panel", parent, "CustomPanel");
+            var old = $.GetContextPanel().FindChildTraverse(PANEL_ID);
+            if (old) {
+                old.DeleteAsync(0.0);
+            }
+
+            old = $.GetContextPanel().FindChildTraverse("CustomPanel");
+            if (old) {
+                old.DeleteAsync(0.0);
+            }
+
+            panel = $.CreatePanel("Panel", parent, PANEL_ID);
             if (!panel) {
                 return;
             }
@@ -98,7 +112,7 @@ function M.start(deps)
                 <Panel class="mainmenu-navbar__btn-small mainmenu-navbar__btn-home MainMenuModeOnly">
                     <RadioButton id="main_menu"
                         style="width: 100%; height: 100%; horizontal-align: center; vertical-align: center;"
-                        onactivate="MainMenu.OnHomeButtonPressed(); $.DispatchEvent( 'PlaySoundEffect', 'UIPanorama.mainmenu_press_home', 'MOUSE' ); $.DispatchEvent('PlayMainMenuMusic', true, true); GameInterfaceAPI.SetSettingString('panorama_play_movie_ambient_sound', '1');"
+                        onactivate="MainMenu.OnHomeButtonPressed(); $.DispatchEvent( 'PlaySoundEffect', 'UIPanorama.mainmenu_press_home', 'MOUSE' );"
                         oncancel="MainMenu.OnEscapeKeyPressed();"
                         onmouseover="UiToolkitAPI.ShowTextTooltip('main_menu', 't.me/debugoverlay');"
                         onmouseout="UiToolkitAPI.HideTextTooltip();">
@@ -117,20 +131,31 @@ function M.start(deps)
         };
 
         var _Destroy = function() {
-            if (cs_logo) {
+            var current = $.GetContextPanel().FindChildTraverse(PANEL_ID);
+            if (current && current !== panel) {
+                current.DeleteAsync(0.0);
+            }
+
             if (panel) {
                 panel.DeleteAsync(0.0);
                 panel = null;
             }
 
-            cs_logo.style.transform = original_transform;
-            cs_logo.style.visibility = original_visibility;
+            if (cs_logo) {
+                cs_logo.style.transform = original_transform;
+                cs_logo.style.visibility = original_visibility;
             }
+        };
+
+        var _Exists = function() {
+            var current = $.GetContextPanel().FindChildTraverse(PANEL_ID);
+            return current && current.IsValid();
         };
 
         return {
             create: _Create,
             destroy: _Destroy,
+            exists: _Exists,
         };
     ]], 'CSGOMainMenu')()
 
@@ -370,9 +395,15 @@ function M.start(deps)
             _DestroyBackgroundLayer();
         };
 
+        var _Exists = function() {
+            var layer = $.GetContextPanel().FindChildTraverse(BACKGROUND_LAYER_ID);
+            return layer && layer.IsValid();
+        };
+
         return {
             change: _ChangeBackground,
-            restore: _RestoreDefault
+            restore: _RestoreDefault,
+            exists: _Exists
         };
     ]], 'CSGOMainMenu')()
 
@@ -543,6 +574,10 @@ function M.start(deps)
     local api = {}
 
     function api.create()
+        if is_on_server() then
+            return
+        end
+
         local options = get_options()
         local logo_url = get_logo_url()
         local server_browser_enabled = array_contains(options, OPTION_SERVER_BROWSER)
@@ -558,7 +593,19 @@ function M.start(deps)
             model = array_contains(options, OPTION_MODEL)
         }
 
-        if settings.cslogo ~= state.cslogo or (settings.cslogo and settings.logo_url ~= state.logo_url) then
+        local logo_exists = false
+
+        if settings.cslogo and type(cs_logo.exists) == 'function' then
+            local ok, result = pcall(cs_logo.exists)
+            logo_exists = ok and result == true
+        end
+
+        if settings.cslogo ~= state.cslogo
+            or (
+                settings.cslogo
+                and (settings.logo_url ~= state.logo_url or not logo_exists)
+            )
+        then
             if settings.cslogo then
                 cs_logo.destroy()
                 cs_logo.create(settings.logo_url)
@@ -585,7 +632,16 @@ function M.start(deps)
             state.news_mode = settings.news_mode
         end
 
-        if settings.background ~= state.background then
+        local background_exists = false
+
+        if settings.background and type(background.exists) == 'function' then
+            local ok, result = pcall(background.exists)
+            background_exists = ok and result == true
+        end
+
+        if settings.background ~= state.background
+            or (settings.background and not background_exists)
+        then
             if settings.background then
                 background.change(BACKGROUND_URL)
             else

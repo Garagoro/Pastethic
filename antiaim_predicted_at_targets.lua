@@ -18,7 +18,6 @@ function M.new(deps)
     local records = {}
     local PREDICT_DISTANCE_START = 650
     local PREDICT_DISTANCE_END = 1000
-    local CURRENT_THREAT_BONUS = 0.25
 
     local function get_origin(player)
         local x, y, z = entity.get_origin(player)
@@ -335,17 +334,36 @@ function M.new(deps)
         return record
     end
 
-    local function get_camera_yaw()
-        local _, yaw = client.camera_angles()
+    local function get_camera_angles()
+        local pitch, yaw = client.camera_angles()
 
-        return yaw
+        return pitch, yaw
     end
 
-    local function get_best_record(me_origin)
-        local current_threat = client.current_threat()
+    local function get_eye_position()
+        local x, y, z = client.eye_position()
+
+        if x == nil then
+            return nil
+        end
+
+        return vector(x, y, z)
+    end
+
+    local function get_crosshair_fov(from, target, view_pitch, view_yaw)
+        local delta = target - from
+        local pitch, yaw = delta:angles()
+        local pitch_delta = utils.normalize(pitch - view_pitch, -180, 180)
+        local yaw_delta = utils.normalize(yaw - view_yaw, -180, 180)
+
+        return math.sqrt(pitch_delta * pitch_delta + yaw_delta * yaw_delta)
+    end
+
+    local function get_best_record(me_origin, eye_position, view_pitch, view_yaw)
         local best_player = nil
         local best_record = nil
-        local best_score = 0
+        local best_fov = nil
+        local best_distance = nil
 
         for player in pairs(records) do
             local record = get_active_record(player)
@@ -358,17 +376,30 @@ function M.new(deps)
                     local distance_weight = get_distance_weight(distance)
 
                     if distance_weight > 0 then
-                        local closeness = 1 - clamp01(distance / PREDICT_DISTANCE_END)
-                        local score = distance_weight * 1.25
-                            + closeness * 0.75
-                            + (record.confidence or 0) * 0.65
+                        local target = record.predicted_origin + vector(0, 0, 52)
+                        local fov = get_crosshair_fov(
+                            eye_position,
+                            target,
+                            view_pitch,
+                            view_yaw
+                        )
 
-                        if player == current_threat then
-                            score = score + CURRENT_THREAT_BONUS
-                        end
-
-                        if score > best_score then
-                            best_score = score
+                        if best_fov == nil
+                            or fov < best_fov
+                            or (
+                                math.abs(fov - best_fov) < 0.15
+                                and (
+                                    best_distance == nil
+                                    or distance < best_distance
+                                    or (
+                                        distance == best_distance
+                                        and (record.confidence or 0) > (best_record.confidence or 0)
+                                    )
+                                )
+                            )
+                        then
+                            best_fov = fov
+                            best_distance = distance
                             best_player = player
                             best_record = record
                         end
@@ -401,15 +432,21 @@ function M.new(deps)
             return false
         end
 
-        local threat, record = get_best_record(my_origin)
+        local eye_position = get_eye_position()
+        local camera_pitch, camera_yaw = get_camera_angles()
 
-        if threat == nil or record == nil then
+        if eye_position == nil or camera_pitch == nil or camera_yaw == nil then
             return false
         end
 
-        local camera_yaw = get_camera_yaw()
+        local threat, record = get_best_record(
+            my_origin,
+            eye_position,
+            camera_pitch,
+            camera_yaw
+        )
 
-        if camera_yaw == nil then
+        if threat == nil or record == nil then
             return false
         end
 

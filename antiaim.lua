@@ -403,64 +403,16 @@ local antiaim = { } do
 
         local pitch_inverted = false
         local modifier_delay_ticks = 0
-        local defensive_angle_delay_state = {
-            pitch = {
-                items = nil,
-                mode = nil,
-                current = 1,
-                last = nil,
-                ticks = 0,
-                from = nil,
-                to = nil,
-                chaos = nil,
-                applied = nil,
-                pending = nil,
-                last_command = nil
-            },
-            yaw = {
-                items = nil,
-                mode = nil,
-                current = 1,
-                last = nil,
-                ticks = 0,
-                from = nil,
-                to = nil,
-                chaos = nil,
-                applied = nil,
-                pending = nil,
-                last_command = nil
-            }
+        local defensive_trigger_state = {
+            items = nil,
+            from = nil,
+            to = nil,
+            duration = nil,
+            wait = 0,
+            active_left = 0,
+            last_command = nil,
+            last_active = false
         }
-        local local_hittable_active = false
-        local defensive_adaptive = {
-            last_calibration = 0,
-            ping_ms = 0,
-            tickrate = 64,
-            jitter_mult = 1.0,
-            adaptive_offset = 0,
-            success_count = 0,
-            fail_count = 0,
-            last_calculation_tick = nil,
-            cached_result = true,
-            cached_delay = 0,
-            performance_score = 1.0,
-            consecutive_failures = 0,
-            last_defensive_tick = 0,
-            was_active = false,
-            velocity_history = { },
-            enemy_aim_history = { },
-            chaos_seed = 0x9E3779B9,
-            lorenz = {
-                x = 0.1,
-                y = 0.1,
-                z = 0.1
-            },
-            current_offset = 0,
-            target_offset = 0,
-            direction = 1,
-            next_change_tick = 0
-        }
-
         local function is_exploit_active()
             if software.is_double_tap_active() then
                 return true
@@ -471,256 +423,6 @@ local antiaim = { } do
             end
 
             return false
-        end
-
-        local function adaptive_chaos_random(min, max)
-            local state = defensive_adaptive
-            local tick = globals.tickcount()
-            local time = globals.realtime()
-
-            state.chaos_seed = bit.bxor(state.chaos_seed, bit.lshift(state.chaos_seed, 13))
-            state.chaos_seed = bit.bxor(state.chaos_seed, bit.rshift(state.chaos_seed, 17))
-            state.chaos_seed = bit.bxor(state.chaos_seed, bit.lshift(state.chaos_seed, 5))
-            state.chaos_seed = bit.bxor(state.chaos_seed, math.floor(time * 1000000) % 999983)
-            state.chaos_seed = bit.bxor(state.chaos_seed, tick * 73939)
-
-            local dt = 0.01
-            local dx = 10 * (state.lorenz.y - state.lorenz.x) * dt
-            local dy = (state.lorenz.x * (28 - state.lorenz.z) - state.lorenz.y) * dt
-            local dz = (state.lorenz.x * state.lorenz.y - 2.667 * state.lorenz.z) * dt
-
-            state.lorenz.x = utils.clamp(state.lorenz.x + dx, -50, 50)
-            state.lorenz.y = utils.clamp(state.lorenz.y + dy, -50, 50)
-            state.lorenz.z = utils.clamp(state.lorenz.z + dz, 0, 50)
-
-            local range = max - min + 1
-            local normalized = utils.clamp(((state.lorenz.x + state.lorenz.y) * 0.02 + 5) / 10, 0, 1)
-            local seed_influence = math.abs(state.chaos_seed) % range
-            local value = min + math.floor(normalized * range * 0.6 + seed_influence * 0.4)
-
-            return utils.clamp(value, min, max)
-        end
-
-        local function calibrate_adaptive_server()
-            local tick = globals.tickcount()
-
-            if tick - defensive_adaptive.last_calibration < 64 then
-                return
-            end
-
-            defensive_adaptive.last_calibration = tick
-            defensive_adaptive.tickrate = math.floor(1 / globals.tickinterval())
-            defensive_adaptive.ping_ms = client.latency() * 1000
-
-            if defensive_adaptive.ping_ms < 30 then
-                defensive_adaptive.jitter_mult = 0.8
-            elseif defensive_adaptive.ping_ms < 60 then
-                defensive_adaptive.jitter_mult = 1.0
-            elseif defensive_adaptive.ping_ms < 100 then
-                defensive_adaptive.jitter_mult = 1.3
-            else
-                defensive_adaptive.jitter_mult = 1.6
-            end
-
-            local attempts = defensive_adaptive.success_count + defensive_adaptive.fail_count
-            local success_rate = defensive_adaptive.success_count / math.max(1, attempts)
-
-            if attempts > 5 then
-                if success_rate < 0.5 then
-                    defensive_adaptive.adaptive_offset = math.min(3, defensive_adaptive.adaptive_offset + 1)
-                elseif success_rate > 0.8 and defensive_adaptive.adaptive_offset > 0 then
-                    defensive_adaptive.adaptive_offset = math.max(0, defensive_adaptive.adaptive_offset - 1)
-                end
-            end
-        end
-
-        local function record_adaptive_result(success)
-            if success then
-                defensive_adaptive.success_count = defensive_adaptive.success_count + 1
-            else
-                defensive_adaptive.fail_count = defensive_adaptive.fail_count + 1
-            end
-
-            local attempts = defensive_adaptive.success_count + defensive_adaptive.fail_count
-
-            if attempts > 10 then
-                local success_rate = defensive_adaptive.success_count / attempts
-
-                if success_rate < 0.4 then
-                    defensive_adaptive.adaptive_offset = math.min(4, defensive_adaptive.adaptive_offset + 1)
-                elseif success_rate > 0.85 then
-                    defensive_adaptive.adaptive_offset = math.max(-1, defensive_adaptive.adaptive_offset - 1)
-                end
-            end
-
-            if attempts > 50 then
-                defensive_adaptive.success_count = math.floor(defensive_adaptive.success_count * 0.7)
-                defensive_adaptive.fail_count = math.floor(defensive_adaptive.fail_count * 0.7)
-            end
-        end
-
-        local function calculate_adaptive_delay()
-            local tick = globals.tickcount()
-
-            if defensive_adaptive.last_calculation_tick == tick then
-                return defensive_adaptive.cached_delay
-            end
-
-            if tick % 16 == 0 then
-                calibrate_adaptive_server()
-            end
-
-            local base_delay = 6
-
-            if defensive_adaptive.performance_score > 0.8 then
-                base_delay = 5
-            elseif defensive_adaptive.performance_score < 0.4 then
-                base_delay = 7
-            end
-
-            local velocity_mod = 0
-            local threat_mod = 0
-            local ping_mod = 0
-            local me = entity.get_local_player()
-
-            if me ~= nil then
-                local velocity = vector(entity.get_prop(me, 'm_vecVelocity'))
-                local speed = math.sqrt(velocity:length2dsqr())
-
-                table.insert(defensive_adaptive.velocity_history, speed)
-
-                if #defensive_adaptive.velocity_history > 5 then
-                    table.remove(defensive_adaptive.velocity_history, 1)
-                end
-
-                local velocity_trend = 0
-
-                if #defensive_adaptive.velocity_history >= 3 then
-                    velocity_trend = defensive_adaptive.velocity_history[#defensive_adaptive.velocity_history] - defensive_adaptive.velocity_history[1]
-                end
-
-                if speed > 250 then
-                    velocity_mod = velocity_trend > 50 and 4 or 3
-                elseif speed > 150 then
-                    velocity_mod = velocity_trend > 30 and 3 or 2
-                elseif speed > 100 then
-                    velocity_mod = 1
-                elseif speed < 30 then
-                    velocity_mod = -1
-                end
-
-                velocity_mod = math.floor(velocity_mod * defensive_adaptive.jitter_mult)
-            end
-
-            local threat = client.current_threat()
-
-            if threat ~= nil and not entity.is_dormant(threat) then
-                local enemy_pitch, enemy_yaw = entity.get_prop(threat, 'm_angEyeAngles')
-
-                if enemy_pitch ~= nil and enemy_yaw ~= nil then
-                    table.insert(defensive_adaptive.enemy_aim_history, {
-                        yaw = enemy_yaw,
-                        pitch = enemy_pitch
-                    })
-
-                    if #defensive_adaptive.enemy_aim_history > 12 then
-                        table.remove(defensive_adaptive.enemy_aim_history, 1)
-                    end
-
-                    if #defensive_adaptive.enemy_aim_history >= 4 then
-                        local yaw_variance = 0
-                        local pitch_variance = 0
-
-                        for i = 2, #defensive_adaptive.enemy_aim_history do
-                            yaw_variance = yaw_variance + math.abs(defensive_adaptive.enemy_aim_history[i].yaw - defensive_adaptive.enemy_aim_history[i - 1].yaw)
-                            pitch_variance = pitch_variance + math.abs(defensive_adaptive.enemy_aim_history[i].pitch - defensive_adaptive.enemy_aim_history[i - 1].pitch)
-                        end
-
-                        yaw_variance = yaw_variance / (#defensive_adaptive.enemy_aim_history - 1)
-                        pitch_variance = pitch_variance / (#defensive_adaptive.enemy_aim_history - 1)
-
-                        local total_variance = yaw_variance + pitch_variance
-
-                        if total_variance < 3 then
-                            threat_mod = 3
-                        elseif total_variance < 8 then
-                            threat_mod = 2
-                        elseif total_variance < 20 then
-                            threat_mod = 1
-                        end
-
-                        if #defensive_adaptive.enemy_aim_history >= 6 then
-                            local recent_variance = 0
-
-                            for i = #defensive_adaptive.enemy_aim_history - 2, #defensive_adaptive.enemy_aim_history do
-                                recent_variance = recent_variance + math.abs(defensive_adaptive.enemy_aim_history[i].yaw - defensive_adaptive.enemy_aim_history[i - 1].yaw)
-                            end
-
-                            recent_variance = recent_variance / 3
-
-                            if recent_variance < 2 then
-                                threat_mod = threat_mod + 1
-                            end
-                        end
-                    end
-                end
-            end
-
-            if defensive_adaptive.ping_ms > 80 then
-                ping_mod = 2
-            elseif defensive_adaptive.ping_ms > 50 then
-                ping_mod = 1
-            end
-
-            if defensive_adaptive.next_change_tick == 0 or tick >= defensive_adaptive.next_change_tick then
-                local chaos_val = adaptive_chaos_random(0, 5)
-                local direction_change = adaptive_chaos_random(1, 100) <= 30
-
-                if direction_change then
-                    defensive_adaptive.direction = -defensive_adaptive.direction
-                end
-
-                defensive_adaptive.target_offset = base_delay + velocity_mod + threat_mod + ping_mod + defensive_adaptive.adaptive_offset
-                defensive_adaptive.target_offset = defensive_adaptive.target_offset + chaos_val * defensive_adaptive.direction
-                defensive_adaptive.target_offset = utils.clamp(
-                    defensive_adaptive.target_offset,
-                    0,
-                    defensive_adaptive.performance_score > 0.7 and 14 or 13
-                )
-
-                local change_interval = adaptive_chaos_random(2, 5)
-
-                if threat_mod > 1 then
-                    change_interval = math.max(1, change_interval - 1)
-                elseif threat_mod == 0 then
-                    change_interval = change_interval + 1
-                end
-
-                defensive_adaptive.next_change_tick = tick + change_interval
-            end
-
-            local smooth_speed = 0.35
-
-            if threat_mod > 1 then
-                smooth_speed = 0.7
-            elseif threat_mod == 0 then
-                smooth_speed = 0.2
-            end
-
-            defensive_adaptive.current_offset = defensive_adaptive.current_offset + (defensive_adaptive.target_offset - defensive_adaptive.current_offset) * smooth_speed
-
-            if math.abs(defensive_adaptive.current_offset - defensive_adaptive.target_offset) < 0.1 then
-                defensive_adaptive.current_offset = defensive_adaptive.target_offset
-            end
-
-            defensive_adaptive.cached_delay = utils.clamp(
-                math.floor(defensive_adaptive.current_offset + 0.5),
-                0,
-                14
-            )
-            defensive_adaptive.last_calculation_tick = tick
-
-            return defensive_adaptive.cached_delay
         end
 
         local function has_trigger(items, name)
@@ -764,96 +466,6 @@ local antiaim = { } do
             end
 
             return bit.band(esp_data.flags, bit.lshift(1, bit_index)) ~= 0
-        end
-
-        local function is_defensive_window_active(items, defensive_data)
-            if items.window == nil then
-                return true
-            end
-
-            local mode = items.window:get()
-            local left = defensive_data.left or 0
-
-            if mode == 'Adaptive' then
-                local tick = globals.tickcount()
-
-                if left <= 0 then
-                    if defensive_adaptive.last_defensive_tick > 0 then
-                        if defensive_adaptive.was_active then
-                            record_adaptive_result(true)
-                            defensive_adaptive.consecutive_failures = 0
-                            defensive_adaptive.performance_score = math.min(
-                                1.0,
-                                defensive_adaptive.performance_score + 0.05
-                            )
-                        else
-                            defensive_adaptive.consecutive_failures = defensive_adaptive.consecutive_failures + 1
-
-                            if defensive_adaptive.consecutive_failures >= 3 then
-                                defensive_adaptive.performance_score = math.max(
-                                    0.3,
-                                    defensive_adaptive.performance_score - 0.1
-                                )
-                            end
-                        end
-                    end
-
-                    defensive_adaptive.last_defensive_tick = 0
-                    defensive_adaptive.was_active = false
-                    defensive_adaptive.last_calculation_tick = nil
-                    defensive_adaptive.cached_result = false
-                    defensive_adaptive.velocity_history = { }
-                    defensive_adaptive.enemy_aim_history = { }
-                    defensive_adaptive.current_offset = 0
-                    defensive_adaptive.direction = 1
-                    defensive_adaptive.next_change_tick = 0
-
-                    return false
-                end
-
-                if defensive_adaptive.last_defensive_tick == 0 then
-                    defensive_adaptive.last_defensive_tick = tick
-                    defensive_adaptive.was_active = true
-                    defensive_adaptive.last_calculation_tick = nil
-                end
-
-                local delay = calculate_adaptive_delay()
-                local active = left > delay
-
-                if not active and left >= math.max(0, delay - 2) then
-                    active = adaptive_chaos_random(1, 100) <= 30
-                end
-
-                if left <= 3 and not active then
-                    active = true
-                end
-
-                defensive_adaptive.was_active = active
-                defensive_adaptive.cached_result = active
-
-                return active
-            end
-
-            if mode == 'Full' then
-                return true
-            end
-
-            local max = math.max(defensive_data.max or 0, defensive_data.left or 0, 1)
-            local progress = 1.0 - utils.clamp(left / max, 0.0, 1.0)
-
-            if mode == 'Early' then
-                return progress < 0.34
-            end
-
-            if mode == 'Middle' then
-                return progress >= 0.34 and progress < 0.67
-            end
-
-            if mode == 'Late' then
-                return progress >= 0.67
-            end
-
-            return true
         end
 
         local function should_force_defensive(items, defensive_data)
@@ -1243,117 +855,6 @@ local antiaim = { } do
 
         end
 
-        local function pick_defensive_angle_delay(state, items)
-            return preset_runtime:pick_delay(state, items, 34)
-        end
-
-        local function capture_fields(target, fields)
-            local held = { }
-
-            for i = 1, #fields do
-                local key = fields[i]
-                held[key] = target[key]
-            end
-
-            return held
-        end
-
-        local function restore_fields(target, fields, held)
-            if held == nil then
-                return
-            end
-
-            for i = 1, #fields do
-                local key = fields[i]
-                target[key] = held[key]
-            end
-        end
-
-        local function reset_angle_delay_state(state)
-            state.items = nil
-            state.mode = nil
-            state.current = 1
-            state.last = nil
-            state.ticks = 0
-            state.from = nil
-            state.to = nil
-            state.chaos = nil
-            state.applied = nil
-            state.pending = nil
-            state.last_command = nil
-        end
-
-        local function update_hittable_angle_delay_reset()
-            local me = entity.get_local_player()
-            local hittable = get_esp_flag(me, 11)
-
-            if hittable and not local_hittable_active then
-                reset_angle_delay_state(defensive_angle_delay_state.pitch)
-                reset_angle_delay_state(defensive_angle_delay_state.yaw)
-            end
-
-            local_hittable_active = hittable
-        end
-
-        local function apply_angle_delay(target, items, state, mode, enabled, fields, cmd)
-            if not enabled or items.delay_from == nil or items.delay_to == nil then
-                reset_angle_delay_state(state)
-                return
-            end
-
-            local delay_from = items.delay_from:get()
-            local delay_to = items.delay_to:get()
-            local delay_chaos = items.delay_chaos ~= nil and items.delay_chaos:get() or 0
-
-            if delay_from <= 1 and delay_to <= 1 then
-                reset_angle_delay_state(state)
-                return
-            end
-
-            local changed = (
-                state.items ~= items
-                or state.mode ~= mode
-                or state.from ~= delay_from
-                or state.to ~= delay_to
-                or state.chaos ~= delay_chaos
-            )
-
-            if changed then
-                state.items = items
-                state.mode = mode
-                state.from = delay_from
-                state.to = delay_to
-                state.chaos = delay_chaos
-                state.current = pick_defensive_angle_delay(state, items)
-                state.ticks = 0
-                state.applied = capture_fields(target, fields)
-                state.pending = state.applied
-                state.last_command = nil
-            end
-
-            if state.applied == nil then
-                state.applied = capture_fields(target, fields)
-                state.pending = state.applied
-                state.current = pick_defensive_angle_delay(state, items)
-                state.ticks = 0
-            end
-
-            state.pending = capture_fields(target, fields)
-
-            if state.last_command ~= cmd.command_number then
-                state.last_command = cmd.command_number
-                state.ticks = state.ticks + 1
-            end
-
-            if state.ticks >= state.current then
-                state.applied = state.pending
-                state.current = pick_defensive_angle_delay(state, items)
-                state.ticks = 0
-            end
-
-            restore_fields(target, fields, state.applied)
-        end
-
         local function update_body_yaw(buffer, items)
             if items.body_yaw == nil then
                 return
@@ -1382,44 +883,138 @@ local antiaim = { } do
             end
         end
 
+        local function reset_trigger_cycle()
+            defensive_trigger_state.items = nil
+            defensive_trigger_state.from = nil
+            defensive_trigger_state.to = nil
+            defensive_trigger_state.duration = nil
+            defensive_trigger_state.wait = 0
+            defensive_trigger_state.active_left = 0
+            defensive_trigger_state.last_command = nil
+            defensive_trigger_state.last_active = false
+        end
+
+        local function get_trigger_cycle_settings(items)
+            local trigger_from = items.trigger_from ~= nil
+                and items.trigger_from:get()
+                or 1
+
+            local trigger_to = items.trigger_to ~= nil
+                and items.trigger_to:get()
+                or trigger_from
+
+            local trigger_duration = items.trigger_duration ~= nil
+                and items.trigger_duration:get()
+                or 1
+
+            trigger_from = math.max(1, math.floor(trigger_from + 0.5))
+            trigger_to = math.max(1, math.floor(trigger_to + 0.5))
+            trigger_duration = math.max(1, math.floor(trigger_duration + 0.5))
+
+            if trigger_from > trigger_to then
+                trigger_from, trigger_to = trigger_to, trigger_from
+            end
+
+            return trigger_from, trigger_to, trigger_duration
+        end
+
+        local function pick_trigger_wait(trigger_from, trigger_to)
+            return utils.random_int(trigger_from, trigger_to)
+        end
+
+        local function update_trigger_cycle(items, cmd)
+            local trigger_from, trigger_to, trigger_duration = get_trigger_cycle_settings(items)
+            local state = defensive_trigger_state
+
+            local changed = (
+                state.items ~= items
+                or state.from ~= trigger_from
+                or state.to ~= trigger_to
+                or state.duration ~= trigger_duration
+            )
+
+            if changed then
+                state.items = items
+                state.from = trigger_from
+                state.to = trigger_to
+                state.duration = trigger_duration
+                state.wait = pick_trigger_wait(trigger_from, trigger_to)
+                state.active_left = 0
+                state.last_command = nil
+                state.last_active = false
+            end
+
+            if state.last_command == cmd.command_number then
+                return state.last_active
+            end
+
+            state.last_command = cmd.command_number
+
+            if state.active_left > 0 then
+                state.active_left = state.active_left - 1
+                state.last_active = true
+
+                if state.active_left <= 0 then
+                    state.wait = pick_trigger_wait(trigger_from, trigger_to)
+                end
+
+                return true
+            end
+
+            if state.wait <= 0 then
+                state.wait = pick_trigger_wait(trigger_from, trigger_to)
+            end
+
+            state.wait = state.wait - 1
+
+            if state.wait <= 0 then
+                state.active_left = trigger_duration - 1
+                state.last_active = true
+
+                if state.active_left <= 0 then
+                    state.wait = pick_trigger_wait(trigger_from, trigger_to)
+                end
+
+                return true
+            end
+
+            state.last_active = false
+
+            return false
+        end
+
         function defensive:apply(cmd, items)
             local is_duck_peek_active = software.is_duck_peek_assist()
 
             if not is_exploit_active() or is_duck_peek_active then
+                reset_trigger_cycle()
                 return false
             end
 
             if not items.enabled:get() then
+                reset_trigger_cycle()
                 return false
             end
 
             local exploit_data = exploit.get()
             local defensive_data = exploit_data.defensive
-            update_hittable_angle_delay_reset()
 
             local trigger_active = should_force_defensive(items, defensive_data)
 
             if not trigger_active then
+                reset_trigger_cycle()
                 return false
             end
 
-            local trigger_tick_delay = items.trigger_tick_delay ~= nil
-                and items.trigger_tick_delay:get()
-                or 1
-
-            if trigger_tick_delay > 1 and cmd.command_number % trigger_tick_delay ~= 0 then
+            if not update_trigger_cycle(items, cmd) then
                 return false
             end
 
             cmd.force_defensive = 1
 
-            local window_active = is_defensive_window_active(items, defensive_data)
+            local defensive_left = defensive_data.left or 0
 
-            if defensive_data.left <= 0 then
-                return false
-            end
-
-            if not window_active then
+            if defensive_left <= 0 then
                 return false
             end
 
@@ -1428,31 +1023,6 @@ local antiaim = { } do
             update_body_yaw(buffer_ctx, items)
             update_pitch(buffer_ctx, items)
             update_yaw(buffer_ctx, items)
-
-            local pitch_mode = items.pitch:get()
-            local yaw_mode = items.yaw:get()
-            local use_pitch_delay = pitch_mode ~= 'Off' and pitch_mode ~= 'Static'
-            local use_yaw_delay = (
-                yaw_mode ~= 'Off'
-                and yaw_mode ~= 'Side Based'
-                and yaw_mode ~= 'Opposite'
-                and yaw_mode ~= 'Freestand'
-                and yaw_mode ~= 'Left/Right'
-            )
-
-            apply_angle_delay(
-                buffer_ctx, items, defensive_angle_delay_state.pitch,
-                pitch_mode, use_pitch_delay, { 'pitch', 'pitch_offset' }, cmd
-            )
-
-            apply_angle_delay(
-                buffer_ctx, items, defensive_angle_delay_state.yaw,
-                yaw_mode, use_yaw_delay, {
-                    'yaw', 'yaw_offset', 'yaw_left', 'yaw_right',
-                    'yaw_jitter', 'jitter_offset', 'freestanding',
-                    'body_yaw', 'body_yaw_offset', 'freestanding_body_yaw'
-                }, cmd
-            )
 
             buffer.defensive = buffer_ctx
 

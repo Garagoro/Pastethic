@@ -418,6 +418,12 @@ end
 local server_browser
 local panel_visible = false
 
+local function is_on_server()
+    local mapname = globals.mapname()
+
+    return type(mapname) == 'string' and mapname ~= ''
+end
+
 local function update_panel_visibility()
     if not state.alive or not server_browser then
         return false
@@ -429,7 +435,7 @@ local function update_panel_visibility()
         in_main_menu = ok and result == true
     end
 
-    local enabled = is_enabled() == true and in_main_menu
+    local enabled = is_enabled() == true and not is_on_server() and in_main_menu
     local background_enabled = is_background_enabled() == true
 
     if enabled and not panel_visible then
@@ -467,6 +473,10 @@ local function run_query_tick(source)
     end
 
     local can_render = update_panel_visibility()
+
+    if not can_render then
+        return
+    end
 
     local ok, changed_or_err = xpcall(steam_query_tick, function(err)
         return tostring(err)

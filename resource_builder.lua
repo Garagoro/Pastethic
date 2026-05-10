@@ -1036,21 +1036,21 @@ local resource do
                     )
                 )
 
-                items.trigger_tick_delay = config_system.push(
-                    'Builder', hash 'trigger_tick_delay', menu.new(
-                        ui.new_slider, 'AA', 'Other', new_key('Trigger tick delay', hash 'trigger_tick_delay'), 1, 32, 1, true, 't'
+                items.trigger_from = config_system.push(
+                    'Builder', hash 'trigger_from', menu.new(
+                        ui.new_slider, 'AA', 'Other', new_key('Trigger from', hash 'trigger_from'), 1, 64, 1, true, 't'
                     )
                 )
 
-                items.window = config_system.push(
-                    'Builder', hash 'window', menu.new(
-                        ui.new_combobox, 'AA', 'Other', new_key('Activation window', hash 'window'), {
-                            'Full',
-                            'Early',
-                            'Middle',
-                            'Late',
-                            'Adaptive'
-                        }
+                items.trigger_to = config_system.push(
+                    'Builder', hash 'trigger_to', menu.new(
+                        ui.new_slider, 'AA', 'Other', new_key('Trigger to', hash 'trigger_to'), 1, 64, 8, true, 't'
+                    )
+                )
+
+                items.trigger_duration = config_system.push(
+                    'Builder', hash 'trigger_duration', menu.new(
+                        ui.new_slider, 'AA', 'Other', new_key('Trigger duration', hash 'trigger_duration'), 1, 32, 3, true, 't'
                     )
                 )
 
@@ -1190,28 +1190,6 @@ local resource do
                         ui.new_checkbox, 'AA', 'Other', new_key(
                             'Freestanding body yaw', hash 'freestanding_body_yaw'
                         )
-                    )
-                )
-
-                items.delay_from = config_system.push(
-                    'Builder', hash 'delay_from', menu.new(
-                        ui.new_slider, 'AA', 'Other', new_key('Delay from', hash 'delay_from'), 1, 34, 1, true, 't', 1, {
-                            [1] = 'Off'
-                        }
-                    )
-                )
-
-                items.delay_to = config_system.push(
-                    'Builder', hash 'delay_to', menu.new(
-                        ui.new_slider, 'AA', 'Other', new_key('Delay to', hash 'delay_to'), 1, 34, 1, true, 't', 1, {
-                            [1] = 'Off'
-                        }
-                    )
-                )
-
-                items.delay_chaos = config_system.push(
-                    'Builder', hash 'delay_chaos', menu.new(
-                        ui.new_slider, 'AA', 'Other', new_key('Delay chaos', hash 'delay_chaos'), 0, 17, 0, true, 't'
                     )
                 )
 
@@ -2475,8 +2453,9 @@ local resource do
 
                 if defensive.enabled:get() then
                     menu_logic.set(defensive.triggers, true)
-                    menu_logic.set(defensive.trigger_tick_delay, true)
-                    menu_logic.set(defensive.window, true)
+                    menu_logic.set(defensive.trigger_from, true)
+                    menu_logic.set(defensive.trigger_to, true)
+                    menu_logic.set(defensive.trigger_duration, true)
                     menu_logic.set(defensive.pitch, true)
 
                     if defensive.pitch:get() ~= 'Off' then
@@ -2496,9 +2475,6 @@ local resource do
 
                     menu_logic.set(defensive.yaw, true)
 
-                    local use_pitch_delay = defensive.pitch:get() ~= 'Off' and defensive.pitch:get() ~= 'Static'
-                    local use_yaw_delay = false
-
                     if defensive.yaw:get() ~= 'Off' then
                         local yaw = defensive.yaw:get()
 
@@ -2514,13 +2490,6 @@ local resource do
                         local have_speed = (
                             yaw == 'Sway' or
                             yaw == 'Distortion'
-                        )
-
-                        use_yaw_delay = (
-                            yaw ~= 'Side Based'
-                            and yaw ~= 'Opposite'
-                            and yaw ~= 'Freestand'
-                            and yaw ~= 'Left/Right'
                         )
 
                         if yaw == 'X-Way' then
@@ -2551,12 +2520,6 @@ local resource do
                                 menu_logic.set(defensive.yaw_speed, true)
                             end
                         end
-                    end
-
-                    if use_pitch_delay or use_yaw_delay then
-                        menu_logic.set(defensive.delay_from, true)
-                        menu_logic.set(defensive.delay_to, true)
-                        menu_logic.set(defensive.delay_chaos, true)
                     end
 
                     menu_logic.set(defensive.body_yaw, true)

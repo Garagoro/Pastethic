@@ -26,10 +26,13 @@ function M.start(deps)
     end
 
     local function get_velocity(player)
-        local x = entity.get_prop(player, 'm_vecVelocity[0]') or 0
-        local y = entity.get_prop(player, 'm_vecVelocity[1]') or 0
+        local x, y, z = entity.get_prop(player, 'm_vecVelocity')
 
-        return math.sqrt(x * x + y * y)
+        return vector(x or 0, y or 0, z or 0)
+    end
+
+    local function get_speed2d(velocity)
+        return math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y)
     end
 
     local function get_simulation_tick(player)
@@ -79,33 +82,242 @@ function M.start(deps)
         end
     end
 
-    local function can_hit_position(me, origin)
-        if me == nil or origin == nil then
+    local function clamp01(value)
+        return utils.clamp(value, 0, 1)
+    end
+
+    local function get_latency_ticks()
+        if client.latency == nil then
+            return 0
+        end
+
+        return utils.clamp(
+            math.floor(client.latency() / globals.tickinterval() + 0.5),
+            0,
+            16
+        )
+    end
+
+    local function is_onground(player)
+        local flags = entity.get_prop(player, 'm_fFlags') or 0
+
+        return flags % 2 == 1
+    end
+
+    local function get_lc_context(origin, previous, tick_delta, speed, airborne)
+        local distance_delta = math.sqrt((origin - previous.origin):lengthsqr())
+        local distance_limit = ref.distance:get()
+        local break_distance = utils.clamp(44 + speed * 0.06, distance_limit, 96)
+
+        if airborne then
+            break_distance = break_distance * 0.85
+        end
+
+        local sim_gap = math.abs(tick_delta)
+        local sim_score = clamp01((sim_gap - 1) / 12)
+        local distance_score = clamp01(
+            (distance_delta - break_distance * 0.55) / math.max(1, break_distance)
+        )
+        local speed_score = clamp01((speed - 35) / 230)
+        local confidence
+
+        if tick_delta < 0 then
+            confidence = 0.86 + speed_score * 0.14
+        else
+            confidence = sim_score * 0.45
+                + distance_score * 0.40
+                + speed_score * 0.25
+                + (airborne and 0.15 or 0)
+        end
+
+        confidence = clamp01(confidence)
+
+        return {
+            airborne = airborne,
+            break_distance = break_distance,
+            confidence = confidence,
+            distance_delta = distance_delta,
+            is_signal = tick_delta < 0 or (
+                tick_delta > 1
+                and tick_delta <= 64
+                and confidence >= 0.34
+                and distance_delta > math.max(18, distance_limit * 0.45)
+                and speed > 15
+            ),
+            speed = speed
+        }
+    end
+
+    local function get_adaptive_max_ticks(airborne, speed)
+        local max_time = airborne and 0.25 or 0.20
+        local ticks = math.floor(max_time / globals.tickinterval() + 0.5)
+
+        if speed > 280 then
+            ticks = ticks + 2
+        elseif speed > 220 then
+            ticks = ticks + 1
+        end
+
+        return utils.clamp(ticks, 8, 22)
+    end
+
+    local function get_predict_ticks(tick_delta, context)
+        local latency_ticks = get_latency_ticks()
+        local base_ticks = tick_delta < 0
+            and math.abs(tick_delta)
+            or math.max(1, tick_delta - 1)
+
+        local lead_ticks = 1
+            + math.floor(context.confidence * 3 + 0.5)
+            + utils.clamp(math.floor(latency_ticks * 0.20 + 0.5), 0, 2)
+
+        if context.airborne then
+            lead_ticks = lead_ticks + 1 + math.floor(context.confidence * 2 + 0.5)
+        elseif context.distance_delta > context.break_distance * 1.4 then
+            lead_ticks = lead_ticks + 1
+        end
+
+        return utils.clamp(
+            base_ticks + lead_ticks,
+            1,
+            get_adaptive_max_ticks(context.airborne, context.speed)
+        )
+    end
+
+    local function get_adaptive_hold_ticks(confidence, airborne, latency_ticks)
+        local hold_time = 0.13 + confidence * 0.07
+
+        if airborne then
+            hold_time = hold_time + 0.04
+        end
+
+        return utils.clamp(
+            math.floor(hold_time / globals.tickinterval() + 0.5)
+                + math.floor(latency_ticks * 0.25),
+            6,
+            24
+        )
+    end
+
+    local function extrapolate(player, origin, ticks)
+        local tickinterval = globals.tickinterval()
+        local velocity = get_velocity(player)
+        local position = vector(origin.x, origin.y, origin.z)
+        local gravity = 800
+        local grounded = is_onground(player)
+
+        for i = 1, ticks do
+            local previous = position
+
+            if not grounded then
+                velocity.z = velocity.z - gravity * tickinterval
+            end
+
+            local predicted = vector(
+                position.x + velocity.x * tickinterval,
+                position.y + velocity.y * tickinterval,
+                position.z + velocity.z * tickinterval
+            )
+
+            local fraction = client.trace_line(
+                -1,
+                previous.x, previous.y, previous.z,
+                predicted.x, predicted.y, predicted.z
+            )
+
+            if fraction ~= nil and fraction <= 0.99 then
+                return previous
+            end
+
+            position = predicted
+        end
+
+        return position
+    end
+
+    local function can_enemy_fire_after_lag(player, predict_ticks)
+        local weapon = entity.get_player_weapon(player)
+
+        if weapon == nil then
             return false
         end
 
-        local ex, ey, ez = client.eye_position()
+        local clip = entity.get_prop(weapon, 'm_iClip1')
 
-        if ex == nil then
+        if clip ~= nil and clip <= 0 then
             return false
         end
 
-        local minimum_damage = software.is_override_minimum_damage()
-            and software.get_override_damage()
-            or software.get_minimum_damage()
-        minimum_damage = minimum_damage or 0
+        local fire_time = globals.curtime() + predict_ticks * globals.tickinterval()
+        local next_attack = entity.get_prop(player, 'm_flNextAttack') or 0
+        local next_primary_attack = entity.get_prop(weapon, 'm_flNextPrimaryAttack') or 0
+        local postpone_ready = entity.get_prop(weapon, 'm_flPostponeFireReadyTime') or 0
 
-        local heights = { 62, 52, 40 }
+        return next_attack <= fire_time
+            and next_primary_attack <= fire_time
+            and postpone_ready <= fire_time
+    end
 
-        for i = 1, #heights do
+    local function get_predicted_eye(player, predicted_origin)
+        local ox, oy, oz = entity.get_prop(player, 'm_vecViewOffset')
+
+        return vector(
+            predicted_origin.x + (ox or 0),
+            predicted_origin.y + (oy or 0),
+            predicted_origin.z + (oz or 64)
+        )
+    end
+
+    local function get_local_target_points(me)
+        local points = {}
+        local hitboxes = { 0, 2, 3, 4 }
+
+        for i = 1, #hitboxes do
+            local x, y, z = entity.hitbox_position(me, hitboxes[i])
+
+            if x ~= nil then
+                points[#points + 1] = vector(x, y, z)
+            end
+        end
+
+        if #points == 0 then
+            local origin = get_origin(me)
+
+            if origin ~= nil then
+                points[#points + 1] = origin + vector(0, 0, 62)
+                points[#points + 1] = origin + vector(0, 0, 52)
+                points[#points + 1] = origin + vector(0, 0, 40)
+            end
+        end
+
+        return points
+    end
+
+    local function get_danger_damage_threshold(me)
+        local health = entity.get_prop(me, 'm_iHealth') or 100
+
+        return utils.clamp(math.floor(health * 0.18 + 0.5), 10, 35)
+    end
+
+    local function can_enemy_hit_local_after_lag(player, me, predicted_origin, predict_ticks)
+        if predicted_origin == nil or not can_enemy_fire_after_lag(player, predict_ticks) then
+            return false
+        end
+
+        local source = get_predicted_eye(player, predicted_origin)
+        local points = get_local_target_points(me)
+        local threshold = get_danger_damage_threshold(me)
+
+        for i = 1, #points do
+            local point = points[i]
             local _, damage = client.trace_bullet(
-                me,
-                ex, ey, ez,
-                origin.x, origin.y, origin.z + heights[i],
+                player,
+                source.x, source.y, source.z,
+                point.x, point.y, point.z,
                 true
             )
 
-            if damage ~= nil and damage >= minimum_damage then
+            if damage ~= nil and damage >= threshold then
                 return true
             end
         end
@@ -115,34 +327,82 @@ function M.start(deps)
 
     local function update_records()
         local tickcount = globals.tickcount()
-        local distance_limit = ref.distance:get()
-        local distance_limit_sqr = distance_limit * distance_limit
         local players = entity.get_players(true)
+        local seen = {}
 
         for i = 1, #players do
             local player = players[i]
+            seen[player] = true
+
+            if entity.is_dormant(player) or not entity.is_alive(player) then
+                records[player] = nil
+                goto continue
+            end
+
             local origin = get_origin(player)
+
+            if origin == nil then
+                records[player] = nil
+                goto continue
+            end
+
             local simulation_tick = get_simulation_tick(player)
             local previous = records[player]
-            local pre_lag_origin = previous and previous.pre_lag_origin or nil
-            local broken_until = previous and previous.broken_until or 0
+            local predicted_origin = previous and previous.predicted_origin or nil
+            local active_until = previous and previous.active_until or 0
+            local confidence = previous and previous.confidence or 0
+            local predict_ticks = previous and previous.predict_ticks or 0
+            local tick_delta = 0
 
             if origin ~= nil and previous ~= nil and previous.origin ~= nil then
-                local tick_delta = simulation_tick - previous.simulation_tick
-                local distance_delta_sqr = (origin - previous.origin):lengthsqr()
+                tick_delta = simulation_tick - previous.simulation_tick
 
-                if tick_delta < 0 or (tick_delta > 1 and tick_delta <= 64 and distance_delta_sqr > distance_limit_sqr) then
-                    pre_lag_origin = previous.origin
-                    broken_until = tickcount + ref.hold_ticks:get()
+                local velocity = get_velocity(player)
+                local speed = get_speed2d(velocity)
+                local airborne = not is_onground(player)
+                local context = get_lc_context(
+                    origin,
+                    previous,
+                    tick_delta,
+                    speed,
+                    airborne
+                )
+
+                if context.is_signal then
+                    confidence = context.confidence
+                    predict_ticks = get_predict_ticks(tick_delta, context)
+                    predicted_origin = extrapolate(player, origin, predict_ticks)
+                    active_until = tickcount + math.max(
+                        ref.hold_ticks:get(),
+                        get_adaptive_hold_ticks(
+                            confidence,
+                            airborne,
+                            get_latency_ticks()
+                        )
+                    )
+                elseif active_until < tickcount then
+                    predicted_origin = nil
+                    predict_ticks = 0
                 end
             end
 
             records[player] = {
                 origin = origin,
                 simulation_tick = simulation_tick,
-                pre_lag_origin = pre_lag_origin,
-                broken_until = broken_until
+                predicted_origin = predicted_origin,
+                active_until = active_until,
+                confidence = confidence,
+                predict_ticks = predict_ticks,
+                tick_delta = tick_delta
             }
+
+            ::continue::
+        end
+
+        for player, record in pairs(records) do
+            if not seen[player] and record.active_until < tickcount then
+                records[player] = nil
+            end
         end
     end
 
@@ -167,12 +427,20 @@ function M.start(deps)
             local record = records[player]
             local should_whitelist = false
 
-            if record ~= nil and record.broken_until >= tickcount then
+            if record ~= nil and record.active_until >= tickcount then
+                local velocity = get_velocity(player)
+                local speed = get_speed2d(velocity)
+
                 should_whitelist = (
                     not entity.is_dormant(player)
                     and entity.is_alive(player)
-                    and get_velocity(player) > min_velocity
-                    and not can_hit_position(me, record.pre_lag_origin)
+                    and speed > min_velocity
+                    and can_enemy_hit_local_after_lag(
+                        player,
+                        me,
+                        record.predicted_origin,
+                        record.predict_ticks or 1
+                    )
                 )
             end
 

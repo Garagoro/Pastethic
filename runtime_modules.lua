@@ -272,6 +272,11 @@ function M.start(ctx)
                 local api = pasthetic_misc_panorama.start({
                     panorama = panorama,
                     has_update = has_update,
+                    is_on_server = function()
+                        local mapname = globals.mapname()
+
+                        return type(mapname) == 'string' and mapname ~= ''
+                    end,
                     get_options = function()
                         return get_panorama_options()
                     end
