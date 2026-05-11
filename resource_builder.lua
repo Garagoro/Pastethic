@@ -469,23 +469,15 @@ local resource do
                     )
                 )
 
-                auto_whitelist_broken_lc.distance = config_system.push(
-                    'Ragebot', 'auto_whitelist_broken_lc.distance', menu.new(
-                        ui.new_slider, 'AA', 'Anti-aimbot angles', new_key('Broken LC distance', 'auto_whitelist_broken_lc'), 16, 128, 64, true, 'u'
+                auto_whitelist_broken_lc.actions = config_system.push(
+                    'Ragebot', 'auto_whitelist_broken_lc.actions', menu.new(
+                        ui.new_multiselect, 'AA', 'Anti-aimbot angles', new_key('Defensive action', 'auto_whitelist_broken_lc.actions'), {
+                            'Force body',
+                            'Whitelist'
+                        }
                     )
                 )
-
-                auto_whitelist_broken_lc.min_velocity = config_system.push(
-                    'Ragebot', 'auto_whitelist_broken_lc.min_velocity', menu.new(
-                        ui.new_slider, 'AA', 'Anti-aimbot angles', new_key('Minimum enemy velocity', 'auto_whitelist_broken_lc'), 0, 250, 5, true, 'u'
-                    )
-                )
-
-                auto_whitelist_broken_lc.hold_ticks = config_system.push(
-                    'Ragebot', 'auto_whitelist_broken_lc.hold_ticks', menu.new(
-                        ui.new_slider, 'AA', 'Anti-aimbot angles', new_key('Broken LC hold', 'auto_whitelist_broken_lc'), 1, 64, 16, true, 't'
-                    )
-                )
+                auto_whitelist_broken_lc.actions:set('Force body')
 
                 auto_whitelist_broken_lc.separator = menu.new(
                     ui.new_label, 'AA', 'Anti-aimbot angles', '\n'
@@ -2123,6 +2115,7 @@ local resource do
                 'Remove stats button',
                 'Remove watch button',
                 'Remove sidebar',
+                'Remove VAC panel',
                 'Remove model in mainmenu'
             )
             render_we.panorama = panorama_section
@@ -2673,13 +2666,8 @@ local resource do
 
                 local is_auto_whitelist_broken_lc = ref.auto_whitelist_broken_lc.enabled:get() do
                     menu_logic.set(ref.auto_whitelist_broken_lc.enabled, true)
-
-                    if is_auto_whitelist_broken_lc then
-                        menu_logic.set(ref.auto_whitelist_broken_lc.distance, true)
-                        menu_logic.set(ref.auto_whitelist_broken_lc.min_velocity, true)
-                        menu_logic.set(ref.auto_whitelist_broken_lc.hold_ticks, true)
-                        menu_logic.set(ref.auto_whitelist_broken_lc.separator, true)
-                    end
+                    menu_logic.set(ref.auto_whitelist_broken_lc.actions, is_auto_whitelist_broken_lc)
+                    menu_logic.set(ref.auto_whitelist_broken_lc.separator, is_auto_whitelist_broken_lc)
                 end
 
                 if resource.main.dormant ~= nil then

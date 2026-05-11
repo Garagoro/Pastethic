@@ -23,6 +23,7 @@ function M.start(ctx)
     local pasthetic_anim_breaker = require_pasthetic_module 'pasthetic/anim_breaker'
     local pasthetic_logging_system = require_pasthetic_module 'pasthetic/logging_system'
     local pasthetic_antiaim = require_pasthetic_module 'pasthetic/antiaim'
+    local pasthetic_antiaim_backtrack_poison = require_pasthetic_module 'pasthetic/antiaim_backtrack_poison'
     local pasthetic_antiaim_predicted_at_targets = require_pasthetic_module 'pasthetic/antiaim_predicted_at_targets'
     local pasthetic_antiaim_record_disruptor = require_pasthetic_module 'pasthetic/antiaim_record_disruptor'
     local pasthetic_antiaim_presets = require_pasthetic_module 'pasthetic/antiaim_presets'
@@ -336,6 +337,20 @@ function M.start(ctx)
         })
         end)
     end
+
+    diagnostics:start('antiaim_backtrack_poison', function()
+        return pasthetic_antiaim_backtrack_poison.start({
+            client = client,
+            entity = entity,
+            globals = globals,
+            utils = utils,
+            software = software,
+            exploit = exploit,
+            renderer = renderer,
+            bit = bit
+        })
+    end)
+    diagnostics:health('antiaim_backtrack_poison', pasthetic_antiaim_backtrack_poison)
 
     diagnostics:start('antiaim', function()
         return pasthetic_antiaim.start({

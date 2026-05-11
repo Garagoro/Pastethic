@@ -14,6 +14,14 @@ function M.start(deps)
     local ref = resource.main.ragebot.auto_whitelist_broken_lc
     local records = {}
     local whitelist_state = {}
+    local force_body_state = {}
+
+    local SERVER_TELEPORT_DISTANCE = 64
+    local SERVER_TELEPORT_DISTANCE_SQR = SERVER_TELEPORT_DISTANCE * SERVER_TELEPORT_DISTANCE
+    local STALL_UPDATES_MIN = 2
+    local STALL_SPEED_MIN = 36
+    local ROLLBACK_HOLD_TICKS = 12
+    local FIRE_TIME_GRACE_TICKS = 2
 
     local function get_origin(player)
         local x, y, z = entity.get_origin(player)
@@ -41,45 +49,73 @@ function M.start(deps)
         return toticks(simulation_time)
     end
 
-    local function set_whitelist(player, value)
+    local function set_player_list_value(storage, player, item_name, value)
         if player == nil then
             return
         end
 
-        local state = whitelist_state[player]
+        local state = storage[player]
 
         if state == nil then
             state = {
-                original = plist.get(player, 'Add to whitelist'),
-                applied = false
+                original = plist.get(player, item_name),
+                applied = nil
             }
 
-            whitelist_state[player] = state
+            storage[player] = state
         end
 
         if state.applied == value then
             return
         end
 
-        plist.set(player, 'Add to whitelist', value)
+        plist.set(player, item_name, value)
         state.applied = value
     end
 
-    local function restore_whitelist(player)
-        local state = whitelist_state[player]
+    local function restore_player_list_value(storage, player, item_name)
+        local state = storage[player]
 
         if state == nil then
             return
         end
 
-        plist.set(player, 'Add to whitelist', state.original)
-        whitelist_state[player] = nil
+        plist.set(player, item_name, state.original)
+        storage[player] = nil
     end
 
-    local function restore_all_whitelists()
+    local function set_whitelist(player)
+        set_player_list_value(whitelist_state, player, 'Add to whitelist', true)
+    end
+
+    local function restore_whitelist(player)
+        restore_player_list_value(whitelist_state, player, 'Add to whitelist')
+    end
+
+    local function set_force_body(player)
+        set_player_list_value(force_body_state, player, 'Override prefer body aim', 'Force')
+    end
+
+    local function restore_force_body(player)
+        restore_player_list_value(force_body_state, player, 'Override prefer body aim')
+    end
+
+    local function restore_all_overrides()
         for player in pairs(whitelist_state) do
             restore_whitelist(player)
         end
+
+        for player in pairs(force_body_state) do
+            restore_force_body(player)
+        end
+    end
+
+    local function is_action_enabled(name)
+        if ref.actions == nil then
+            return name == 'Force body'
+        end
+
+        return ref.actions:get(name)
     end
 
     local function clamp01(value)
@@ -104,50 +140,6 @@ function M.start(deps)
         return flags % 2 == 1
     end
 
-    local function get_lc_context(origin, previous, tick_delta, speed, airborne)
-        local distance_delta = math.sqrt((origin - previous.origin):lengthsqr())
-        local distance_limit = ref.distance:get()
-        local break_distance = utils.clamp(44 + speed * 0.06, distance_limit, 96)
-
-        if airborne then
-            break_distance = break_distance * 0.85
-        end
-
-        local sim_gap = math.abs(tick_delta)
-        local sim_score = clamp01((sim_gap - 1) / 12)
-        local distance_score = clamp01(
-            (distance_delta - break_distance * 0.55) / math.max(1, break_distance)
-        )
-        local speed_score = clamp01((speed - 35) / 230)
-        local confidence
-
-        if tick_delta < 0 then
-            confidence = 0.86 + speed_score * 0.14
-        else
-            confidence = sim_score * 0.45
-                + distance_score * 0.40
-                + speed_score * 0.25
-                + (airborne and 0.15 or 0)
-        end
-
-        confidence = clamp01(confidence)
-
-        return {
-            airborne = airborne,
-            break_distance = break_distance,
-            confidence = confidence,
-            distance_delta = distance_delta,
-            is_signal = tick_delta < 0 or (
-                tick_delta > 1
-                and tick_delta <= 64
-                and confidence >= 0.34
-                and distance_delta > math.max(18, distance_limit * 0.45)
-                and speed > 15
-            ),
-            speed = speed
-        }
-    end
-
     local function get_adaptive_max_ticks(airborne, speed)
         local max_time = airborne and 0.25 or 0.20
         local ticks = math.floor(max_time / globals.tickinterval() + 0.5)
@@ -161,11 +153,20 @@ function M.start(deps)
         return utils.clamp(ticks, 8, 22)
     end
 
-    local function get_predict_ticks(tick_delta, context)
+    local function get_predict_ticks(context)
         local latency_ticks = get_latency_ticks()
-        local base_ticks = tick_delta < 0
-            and math.abs(tick_delta)
-            or math.max(1, tick_delta - 1)
+        local tick_delta = context.tick_delta or 0
+        local base_ticks
+
+        if context.teleported then
+            base_ticks = math.max(1, math.min(math.abs(tick_delta), 14))
+        elseif context.release then
+            base_ticks = math.max(1, math.min(math.max(tick_delta, context.stale_updates or 0), 14))
+        elseif context.rollback then
+            base_ticks = math.max(1, math.min(math.abs(tick_delta) + 1, 14))
+        else
+            base_ticks = math.max(1, math.min((context.stale_updates or 0) + 1, 10))
+        end
 
         local lead_ticks = 1
             + math.floor(context.confidence * 3 + 0.5)
@@ -173,7 +174,7 @@ function M.start(deps)
 
         if context.airborne then
             lead_ticks = lead_ticks + 1 + math.floor(context.confidence * 2 + 0.5)
-        elseif context.distance_delta > context.break_distance * 1.4 then
+        elseif context.teleported or context.origin_delta > 48 then
             lead_ticks = lead_ticks + 1
         end
 
@@ -184,10 +185,13 @@ function M.start(deps)
         )
     end
 
-    local function get_adaptive_hold_ticks(confidence, airborne, latency_ticks)
-        local hold_time = 0.13 + confidence * 0.07
+    local function get_adaptive_hold_ticks(context, latency_ticks)
+        local confidence = context.confidence or 0
+        local hold_time = context.release and 0.16 or 0.11
 
-        if airborne then
+        hold_time = hold_time + confidence * 0.08
+
+        if context.airborne then
             hold_time = hold_time + 0.04
         end
 
@@ -197,6 +201,87 @@ function M.start(deps)
             6,
             24
         )
+    end
+
+    local function build_record_context(origin, previous, simulation_tick, tick_delta, speed, airborne, tickcount)
+        local origin_delta_sqr = (origin - previous.origin):lengthsqr()
+        local origin_delta = math.sqrt(origin_delta_sqr)
+        local stale_updates = tick_delta == 0
+            and (previous.stale_updates or 0) + 1
+            or 0
+        local rollback_until = previous.rollback_until or 0
+        local rollback = tick_delta < 0
+
+        if rollback then
+            stale_updates = math.max(stale_updates, STALL_UPDATES_MIN)
+            rollback_until = tickcount + ROLLBACK_HOLD_TICKS
+        end
+
+        local had_bad_record = rollback
+            or rollback_until >= tickcount
+            or (previous.stale_updates or 0) >= STALL_UPDATES_MIN
+            or previous.defensive_like
+        local teleported = origin_delta_sqr > SERVER_TELEPORT_DISTANCE_SQR
+        local release = tick_delta > 0
+            and had_bad_record
+            and (
+                teleported
+                or origin_delta > 14
+                or tick_delta > 2
+                or speed > STALL_SPEED_MIN
+                or airborne
+            )
+        local stale_threat = tick_delta == 0
+            and stale_updates >= STALL_UPDATES_MIN
+            and (speed > STALL_SPEED_MIN or airborne)
+        local rollback_threat = rollback_until >= tickcount
+            and (speed > 12 or airborne or origin_delta > 8)
+
+        local speed_score = clamp01((speed - 24) / 240)
+        local stale_score = clamp01((stale_updates - 1) / 6)
+        local delta_score = clamp01((origin_delta - 12) / SERVER_TELEPORT_DISTANCE)
+        local tick_score = clamp01((math.abs(tick_delta) - 1) / 12)
+        local confidence = 0
+
+        if teleported then
+            confidence = math.max(confidence, 0.88 + delta_score * 0.12)
+        end
+
+        if release then
+            confidence = math.max(confidence, 0.64 + delta_score * 0.20 + speed_score * 0.16)
+        end
+
+        if rollback then
+            confidence = math.max(confidence, 0.78 + tick_score * 0.14 + speed_score * 0.08)
+        elseif rollback_threat then
+            confidence = math.max(confidence, 0.58 + speed_score * 0.18 + delta_score * 0.12)
+        end
+
+        if stale_threat then
+            confidence = math.max(confidence, 0.42 + stale_score * 0.26 + speed_score * 0.20 + (airborne and 0.10 or 0))
+        end
+
+        confidence = clamp01(confidence)
+
+        return {
+            airborne = airborne,
+            confidence = confidence,
+            defensive_like = rollback or rollback_threat or stale_threat,
+            is_signal = teleported
+                or release
+                or rollback
+                or rollback_threat
+                or (stale_threat and confidence >= 0.48),
+            origin_delta = origin_delta,
+            rollback = rollback,
+            rollback_until = rollback_until,
+            release = release,
+            simulation_tick = simulation_tick,
+            speed = speed,
+            stale_updates = stale_updates,
+            teleported = teleported,
+            tick_delta = tick_delta
+        }
     end
 
     local function extrapolate(player, origin, ticks)
@@ -248,7 +333,8 @@ function M.start(deps)
             return false
         end
 
-        local fire_time = globals.curtime() + predict_ticks * globals.tickinterval()
+        local fire_time = globals.curtime()
+            + (predict_ticks + FIRE_TIME_GRACE_TICKS) * globals.tickinterval()
         local next_attack = entity.get_prop(player, 'm_flNextAttack') or 0
         local next_primary_attack = entity.get_prop(weapon, 'm_flNextPrimaryAttack') or 0
         local postpone_ready = entity.get_prop(weapon, 'm_flPostponeFireReadyTime') or 0
@@ -352,37 +438,42 @@ function M.start(deps)
             local active_until = previous and previous.active_until or 0
             local confidence = previous and previous.confidence or 0
             local predict_ticks = previous and previous.predict_ticks or 0
+            local stale_updates = previous and previous.stale_updates or 0
+            local rollback_until = previous and previous.rollback_until or 0
+            local defensive_like = previous and previous.defensive_like or false
+            local origin_delta = 0
             local tick_delta = 0
+            local velocity = get_velocity(player)
+            local speed = get_speed2d(velocity)
+            local airborne = not is_onground(player)
 
             if origin ~= nil and previous ~= nil and previous.origin ~= nil then
                 tick_delta = simulation_tick - previous.simulation_tick
 
-                local velocity = get_velocity(player)
-                local speed = get_speed2d(velocity)
-                local airborne = not is_onground(player)
-                local context = get_lc_context(
+                local context = build_record_context(
                     origin,
                     previous,
+                    simulation_tick,
                     tick_delta,
                     speed,
-                    airborne
+                    airborne,
+                    tickcount
                 )
+
+                stale_updates = context.stale_updates
+                rollback_until = context.rollback_until
+                defensive_like = context.defensive_like
+                origin_delta = context.origin_delta
 
                 if context.is_signal then
                     confidence = context.confidence
-                    predict_ticks = get_predict_ticks(tick_delta, context)
+                    predict_ticks = get_predict_ticks(context)
                     predicted_origin = extrapolate(player, origin, predict_ticks)
-                    active_until = tickcount + math.max(
-                        ref.hold_ticks:get(),
-                        get_adaptive_hold_ticks(
-                            confidence,
-                            airborne,
-                            get_latency_ticks()
-                        )
-                    )
+                    active_until = tickcount + get_adaptive_hold_ticks(context, get_latency_ticks())
                 elseif active_until < tickcount then
                     predicted_origin = nil
                     predict_ticks = 0
+                    confidence = 0
                 end
             end
 
@@ -393,7 +484,13 @@ function M.start(deps)
                 active_until = active_until,
                 confidence = confidence,
                 predict_ticks = predict_ticks,
-                tick_delta = tick_delta
+                tick_delta = tick_delta,
+                stale_updates = stale_updates,
+                rollback_until = rollback_until,
+                defensive_like = defensive_like,
+                origin_delta = origin_delta,
+                airborne = airborne,
+                speed = speed
             }
 
             ::continue::
@@ -414,27 +511,27 @@ function M.start(deps)
         local me = entity.get_local_player()
 
         if me == nil or not entity.is_alive(me) then
-            restore_all_whitelists()
+            restore_all_overrides()
             return
         end
 
         local tickcount = globals.tickcount()
-        local min_velocity = ref.min_velocity:get()
         local players = entity.get_players(true)
+        local use_force_body = is_action_enabled('Force body')
+        local use_whitelist = is_action_enabled('Whitelist')
+        local seen = {}
 
         for i = 1, #players do
             local player = players[i]
+            seen[player] = true
+
             local record = records[player]
-            local should_whitelist = false
+            local should_apply = false
 
             if record ~= nil and record.active_until >= tickcount then
-                local velocity = get_velocity(player)
-                local speed = get_speed2d(velocity)
-
-                should_whitelist = (
+                should_apply = (
                     not entity.is_dormant(player)
                     and entity.is_alive(player)
-                    and speed > min_velocity
                     and can_enemy_hit_local_after_lag(
                         player,
                         me,
@@ -444,16 +541,34 @@ function M.start(deps)
                 )
             end
 
-            if should_whitelist then
-                set_whitelist(player, true)
+            if should_apply and use_whitelist then
+                set_whitelist(player)
             else
                 restore_whitelist(player)
+            end
+
+            if should_apply and use_force_body then
+                set_force_body(player)
+            else
+                restore_force_body(player)
+            end
+        end
+
+        for player in pairs(whitelist_state) do
+            if not seen[player] then
+                restore_whitelist(player)
+            end
+        end
+
+        for player in pairs(force_body_state) do
+            if not seen[player] then
+                restore_force_body(player)
             end
         end
     end
 
     local function on_shutdown()
-        restore_all_whitelists()
+        restore_all_overrides()
         records = {}
     end
 

@@ -809,12 +809,53 @@ server_browser = panorama.loadstring([[
         try { rootPanel.style.hittestchildren = value; } catch (e) {}
     }
 
+    function isVacNotificationVisible() {
+        try {
+            if (typeof MyPersonaAPI === 'undefined' ||
+                typeof MyPersonaAPI.IsVacBanned !== 'function' ||
+                MyPersonaAPI.IsVacBanned() == 0) {
+                return false;
+            }
+        } catch (e) {
+            return false;
+        }
+
+        var notification = $.GetContextPanel().FindChildTraverse('NotificationsContainer');
+        if (!isValidPanel(notification)) {
+            return false;
+        }
+
+        if (typeof notification.BHasClass === 'function' && notification.BHasClass('hidden')) {
+            return false;
+        }
+
+        if (String(notification.style.visibility || '').toLowerCase() === 'collapse') {
+            return false;
+        }
+
+        if (String(notification.style.opacity || '') === '0') {
+            return false;
+        }
+
+        return true;
+    }
+
+    function applyBrowserPosition(rootPanel) {
+        var news = getNewsPanel();
+        var parent = rootPanel.GetParent ? rootPanel.GetParent() : null;
+        var insideNews = news && parent === news;
+        rootPanel.style.marginLeft = isVacNotificationVisible()
+            ? (insideNews ? '20px' : '150px')
+            : (insideNews ? '0px' : '130px');
+    }
+
     function updateHitTest() {
         var rootPanel = findBrowserRoot();
         if (!isValidPanel(rootPanel)) {
             return false;
         }
 
+        applyBrowserPosition(rootPanel);
         setBrowserHitTest(rootPanel, true);
         return true;
     }
@@ -1012,7 +1053,7 @@ server_browser = panorama.loadstring([[
         rootPanel.style.height = '870px';
         rootPanel.style.horizontalAlign = 'left';
         rootPanel.style.verticalAlign = 'top';
-        rootPanel.style.marginLeft = insideNews ? '20px' : '150px';
+        applyBrowserPosition(rootPanel);
         rootPanel.style.marginTop = insideNews ? '20px' : '75px';
         rootPanel.style.flowChildren = 'down';
         rootPanel.style.overflow = 'clip';

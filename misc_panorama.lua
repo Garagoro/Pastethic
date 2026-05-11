@@ -7,6 +7,7 @@ local OPTION_BACKGROUND = 'Change background'
 local OPTION_STATS = 'Remove stats button'
 local OPTION_WATCH = 'Remove watch button'
 local OPTION_SIDEBAR = 'Remove sidebar'
+local OPTION_VAC = 'Remove VAC panel'
 local OPTION_MODEL = 'Remove model in mainmenu'
 
 local LOGO_OUTDATED_URL = 'https://raw.githubusercontent.com/Garagoro/Pasthetic/refs/heads/main/logo%202.png'
@@ -65,6 +66,7 @@ function M.start(deps)
         stats = false,
         watch = false,
         sidebar = false,
+        vac = false,
         model = false
     }
 
@@ -538,6 +540,70 @@ function M.start(deps)
         };
     ]], 'CSGOMainMenu')()
 
+    local remove_vac_panel = panorama.loadstring([[
+        var notification_panel = null;
+        var original_visibility = null;
+        var original_opacity = null;
+        var original_transform = null;
+
+        var _IsValid = function(panel) {
+            return panel && (!panel.IsValid || panel.IsValid());
+        };
+
+        var _IsVacNotification = function() {
+            try {
+                return typeof MyPersonaAPI !== 'undefined'
+                    && typeof MyPersonaAPI.IsVacBanned === 'function'
+                    && MyPersonaAPI.IsVacBanned() != 0;
+            } catch (e) {
+                return false;
+            }
+        };
+
+        var _Hide = function() {
+            var panel = $.GetContextPanel().FindChildTraverse('NotificationsContainer');
+            if (!_IsValid(panel)) {
+                return;
+            }
+
+            if (!_IsVacNotification()) {
+                _Show();
+                return;
+            }
+
+            if (notification_panel !== panel) {
+                notification_panel = panel;
+                original_visibility = panel.style.visibility || 'visible';
+                original_opacity = panel.style.opacity || '1';
+                original_transform = panel.style.transform || 'none';
+            }
+
+            panel.style.visibility = 'collapse';
+            panel.style.opacity = '0';
+            panel.style.transform = 'translate3d(-9999px, -9999px, 0)';
+            try { panel.hittest = false; } catch (e) {}
+            try { panel.hittestchildren = false; } catch (e) {}
+        };
+
+        var _Show = function() {
+            if (!_IsValid(notification_panel)) {
+                notification_panel = null;
+                return;
+            }
+
+            notification_panel.style.visibility = original_visibility || 'visible';
+            notification_panel.style.opacity = original_opacity || '1';
+            notification_panel.style.transform = original_transform || 'none';
+            try { notification_panel.hittest = true; } catch (e) {}
+            try { notification_panel.hittestchildren = true; } catch (e) {}
+            notification_panel = null;
+        };
+
+        return {
+            hide: _Hide,
+            show: _Show
+        };
+    ]], 'CSGOMainMenu')()
     local remove_model = panorama.loadstring([[
         var panel = null;
         var original_panel = null;
@@ -590,6 +656,7 @@ function M.start(deps)
             stats = array_contains(options, OPTION_STATS),
             watch = array_contains(options, OPTION_WATCH),
             sidebar = array_contains(options, OPTION_SIDEBAR),
+            vac = array_contains(options, OPTION_VAC),
             model = array_contains(options, OPTION_MODEL)
         }
 
@@ -677,6 +744,13 @@ function M.start(deps)
             state.sidebar = settings.sidebar
         end
 
+        if settings.vac then
+            remove_vac_panel.hide()
+        elseif state.vac then
+            remove_vac_panel.show()
+        end
+        state.vac = settings.vac
+
         if settings.model ~= state.model then
             if settings.model then
                 remove_model.hide()
@@ -694,6 +768,7 @@ function M.start(deps)
         stats_button.show()
         watch_button.show()
         remove_sidebar.show()
+        remove_vac_panel.show()
         remove_model.show()
     end
 
