@@ -10,6 +10,7 @@ function M.start(deps)
     local cvar = deps.cvar or cvar
     local materialsystem = deps.materialsystem or materialsystem
     local bit = deps.bit or bit
+    local vtable_thunk = deps.vtable_thunk or vtable_thunk
 -- ============================================
 -- WORLD ENHANCER + ADBLOCK RUNTIME
 -- ============================================
@@ -17,8 +18,8 @@ do
 local ffi = require("ffi")
 local easing = require("gamesense/easing")
 
-local client_set_cvar, client_get_cvar, client_exec, client_log =
-    client.set_cvar, client.get_cvar, client.exec, client.log
+local client_set_cvar, client_get_cvar, client_exec, client_log, client_key_state =
+    client.set_cvar, client.get_cvar, client.exec, client.log, client.key_state
 local client_delay_call, client_color_log, client_trace_line, client_error_log =
     client.delay_call, client.color_log, client.trace_line, client.error_log
 local client_eye_position, client_screen_size, client_userid_to_entindex =
@@ -32,11 +33,11 @@ local entity_get_origin, entity_get_classname, entity_get_game_rules, entity_get
 local entity_is_alive = entity.is_alive
 local globals_mapname, globals_curtime, globals_tickcount, globals_frametime, globals_framecount =
     globals.mapname, globals.curtime, globals.tickcount, globals.frametime, globals.framecount
-local renderer_world_to_screen, renderer_line, renderer_gradient, renderer_text =
-    renderer.world_to_screen, renderer.line, renderer.gradient, renderer.text
+local renderer_world_to_screen, renderer_line, renderer_gradient, renderer_text, renderer_rectangle =
+    renderer.world_to_screen, renderer.line, renderer.gradient, renderer.text, renderer.rectangle
 local materialsystem_find_materials = materialsystem.find_materials
 local ffi_cast, ffi_typeof = ffi.cast, ffi.typeof
-local math_floor, math_max = math.floor, math.max
+local math_floor, math_max, math_min, math_sqrt = math.floor, math.max, math.min, math.sqrt
 local bit_band = bit.band
 local string_find, string_lower, string_format = string.find, string.lower, string.format
 local table_insert, table_remove, table_sort = table.insert, table.remove, table.sort
@@ -57,6 +58,10 @@ ffi.cdef([[
         float x, y, z;
     } we_Vector;
 
+    typedef struct {
+        float x, y, z;
+    } we_attachment_vec3;
+
     typedef void*(*WE_CreateClass)(int, int);
     typedef void*(*WE_CreateEvent)();
 
@@ -69,6 +74,9 @@ ffi.cdef([[
         int class_id;
     } WE_ClientClass;
 
+    typedef bool(__thiscall *WE_IsButtonDown)(void*, int);
+    typedef int(__thiscall *WE_GetInputTick)(void*, int);
+    typedef int(__thiscall *WE_GetAnalog)(void*, int);
 
 
 ]])
@@ -76,6 +84,7 @@ ffi.cdef([[
 -- reference to menu items
 local rw = resource.render_we.world
 local rm = resource.render_we.misc
+local vm_editor_thirdperson_ref = { ui.reference("VISUALS", "Effects", "Force third person (alive)") }
 
 local we_vars = {
     aspect_ratio = { old = client_get_cvar("r_aspectratio") },
@@ -94,6 +103,42 @@ local we_vars = {
         old_x   = client_get_cvar("viewmodel_offset_x"),
         old_y   = client_get_cvar("viewmodel_offset_y"),
         old_z   = client_get_cvar("viewmodel_offset_z"),
+        fov = 54,
+        x = 25,
+        y = -20,
+        z = -20,
+        scope_x = -150,
+        current_fov = nil,
+        current_x = nil,
+        current_y = nil,
+        current_z = nil,
+    },
+    viewmodel_editor = {
+        w = 145,
+        h = 55,
+        dragging = false,
+        drag_start_mouse_x = nil,
+        drag_start_mouse_y = nil,
+        drag_grab_to_muzzle_x = nil,
+        drag_grab_to_muzzle_y = nil,
+        last_x = nil,
+        last_y = nil,
+        wheel_up_prev = false,
+        wheel_down_prev = false,
+        wheel_up_tick = 0,
+        wheel_down_tick = 0,
+        wheel_next_tick = 0,
+        inputsystem = nil,
+        is_button_down = nil,
+        get_button_pressed_tick = nil,
+        get_analog_delta = nil,
+        input_ready = nil,
+        attachment_ready = nil,
+        entity_list = nil,
+        get_client_entity = nil,
+        get_attachment = nil,
+        get_muzzle_attachment = nil,
+        block_input_until = 0,
     },
     scope_hide = { x_current = nil },
     effects = {
@@ -477,7 +522,7 @@ we_cb.thirdperson = function()
     client_set_cvar("cam_idealdist", rm.thirdperson.distance:get())
 end
 
-    we_cb.aspect_ratio = function()
+we_cb.aspect_ratio = function()
     if not rm.aspect_ratio.override:get() then
         client_set_cvar("r_aspectratio", we_vars.aspect_ratio.old or 0)
         return
@@ -488,69 +533,454 @@ end
     client_set_cvar("r_aspectratio", tostring(val))
 end
 
+local VM_EDITOR_WHEEL_UP = 112
+local VM_EDITOR_WHEEL_DOWN = 113
+local VM_EDITOR_MOUSE_WHEEL = 3
+local VM_EDITOR_X_MIN, VM_EDITOR_X_MAX = -300, 300
+local VM_EDITOR_Y_MIN, VM_EDITOR_Y_MAX = -300, 300
+local VM_EDITOR_Z_MIN, VM_EDITOR_Z_MAX = -300, 300
+local VM_EDITOR_FOV_MIN, VM_EDITOR_FOV_MAX = -60, 100
+
+local function vm_editor_clamp(value, min_value, max_value)
+    return math_max(min_value, math_min(max_value, value))
+end
+
+local function vm_editor_round(value)
+    return math_floor(value + 0.5)
+end
+
+local function vm_editor_set_slider(item, value, min_value, max_value)
+    item:set(vm_editor_clamp(vm_editor_round(value), min_value, max_value))
+end
+
+local function vm_editor_set_value(key, value, min_value, max_value)
+    we_vars.viewmodel[key] = vm_editor_clamp(value, min_value, max_value)
+end
+
+local function vm_editor_is_hovered(mx, my)
+    local editor = we_vars.viewmodel_editor
+    if editor.last_x == nil or editor.last_y == nil then
+        return false
+    end
+
+    return mx >= editor.last_x and my >= editor.last_y
+        and mx <= editor.last_x + editor.w and my <= editor.last_y + editor.h
+end
+
+local function vm_editor_init_attachment()
+    local editor = we_vars.viewmodel_editor
+    if editor.attachment_ready ~= nil then
+        return editor.attachment_ready
+    end
+
+    if not vtable_thunk then
+        editor.attachment_ready = false
+        return false
+    end
+
+    local raw_entity_list = client_create_interface("client_panorama.dll", "VClientEntityList003")
+        or client_create_interface("client.dll", "VClientEntityList003")
+
+    if not raw_entity_list then
+        editor.attachment_ready = false
+        return false
+    end
+
+    local ok, get_client_entity, get_attachment, get_muzzle_attachment = pcall(function()
+        return
+            vtable_thunk(3, "void*(__thiscall*)(void*, int)"),
+            vtable_thunk(84, "bool(__thiscall*)(void*, int, we_attachment_vec3&)"),
+            vtable_thunk(468, "int(__thiscall*)(void*, void*)")
+    end)
+
+    if not ok or not get_client_entity or not get_attachment or not get_muzzle_attachment then
+        editor.attachment_ready = false
+        return false
+    end
+
+    editor.entity_list = raw_entity_list
+    editor.get_client_entity = get_client_entity
+    editor.get_attachment = get_attachment
+    editor.get_muzzle_attachment = get_muzzle_attachment
+    editor.attachment_ready = true
+    return true
+end
+
+local function vm_editor_get_anchor()
+    local editor = we_vars.viewmodel_editor
+    if not vm_editor_init_attachment() then return nil, nil end
+
+    local lp = entity_get_local_player()
+    if not lp or not entity_is_alive(lp) then return nil, nil end
+
+    local weapon = entity_get_player_weapon(lp)
+    if not weapon then return nil, nil end
+
+    local view_model = entity_get_prop(lp, "m_hViewModel[0]")
+    if not view_model then return nil, nil end
+
+    local ok, sx, sy = pcall(function()
+        local active_weapon = editor.get_client_entity(editor.entity_list, weapon)
+        local view_model_entity = editor.get_client_entity(editor.entity_list, view_model)
+
+        if not active_weapon or not view_model_entity then
+            return nil, nil
+        end
+
+        local attachment_index = editor.get_muzzle_attachment(active_weapon, view_model_entity)
+        if not attachment_index or attachment_index <= 0 then
+            return nil, nil
+        end
+
+        local attachment = ffi.new("we_attachment_vec3[1]")
+        if not editor.get_attachment(view_model_entity, attachment_index, attachment[0]) then
+            return nil, nil
+        end
+
+        return renderer_world_to_screen(attachment[0].x, attachment[0].y, attachment[0].z)
+    end)
+
+    if not ok or sx == nil or sy == nil then
+        return nil, nil
+    end
+
+    return sx - editor.w, sy - editor.h
+end
+
+local function vm_editor_init_input()
+    local editor = we_vars.viewmodel_editor
+    if editor.input_ready ~= nil then
+        return editor.input_ready
+    end
+
+    local raw_inputsystem = client_create_interface("inputsystem.dll", "InputSystemVersion001")
+    if not raw_inputsystem then
+        editor.input_ready = false
+        return false
+    end
+
+    local inputsystem = ffi_cast("void***", raw_inputsystem)
+    local ok, is_button_down, get_button_pressed_tick, get_analog_delta = pcall(function()
+        return
+            ffi_cast("WE_IsButtonDown", inputsystem[0][15]),
+            ffi_cast("WE_GetInputTick", inputsystem[0][16]),
+            ffi_cast("WE_GetAnalog", inputsystem[0][19])
+    end)
+
+    if not ok or not is_button_down or not get_button_pressed_tick or not get_analog_delta then
+        editor.input_ready = false
+        return false
+    end
+
+    editor.inputsystem = inputsystem
+    editor.is_button_down = is_button_down
+    editor.get_button_pressed_tick = get_button_pressed_tick
+    editor.get_analog_delta = get_analog_delta
+    editor.input_ready = true
+    return true
+end
+
+local function vm_editor_button_down(button_code)
+    local editor = we_vars.viewmodel_editor
+    if not vm_editor_init_input() then return false end
+
+    local ok, result = pcall(editor.is_button_down, editor.inputsystem, button_code)
+    return ok and result == true
+end
+
+local function vm_editor_get_wheel_delta()
+    local editor = we_vars.viewmodel_editor
+    if not vm_editor_init_input() then return 0 end
+    if globals_tickcount() < editor.wheel_next_tick then return 0 end
+
+    local ok_up, up_tick = pcall(editor.get_button_pressed_tick, editor.inputsystem, VM_EDITOR_WHEEL_UP)
+    local ok_down, down_tick = pcall(editor.get_button_pressed_tick, editor.inputsystem, VM_EDITOR_WHEEL_DOWN)
+    local delta = 0
+
+    if ok_up and up_tick ~= nil and up_tick ~= 0 and up_tick ~= editor.wheel_up_tick then
+        delta = delta + 1
+        editor.wheel_up_tick = up_tick
+    end
+
+    if ok_down and down_tick ~= nil and down_tick ~= 0 and down_tick ~= editor.wheel_down_tick then
+        delta = delta - 1
+        editor.wheel_down_tick = down_tick
+    end
+
+    if delta ~= 0 then
+        editor.wheel_next_tick = globals_tickcount() + 2
+        return delta
+    end
+
+    local up = vm_editor_button_down(VM_EDITOR_WHEEL_UP)
+    local down = vm_editor_button_down(VM_EDITOR_WHEEL_DOWN)
+
+    if up and not editor.wheel_up_prev then
+        delta = delta + 1
+    end
+
+    if down and not editor.wheel_down_prev then
+        delta = delta - 1
+    end
+
+    editor.wheel_up_prev = up
+    editor.wheel_down_prev = down
+
+    if delta ~= 0 then
+        editor.wheel_next_tick = globals_tickcount() + 2
+    end
+
+    return delta
+end
+
+local function vm_editor_capture_input()
+    we_vars.viewmodel_editor.block_input_until = globals_tickcount() + 2
+end
+
+local function vm_editor_should_block_input()
+    local editor = we_vars.viewmodel_editor
+    return editor.block_input_until ~= nil
+        and globals_tickcount() <= editor.block_input_until
+end
+
+local function vm_editor_is_scoped()
+    local lp = entity_get_local_player()
+    if not lp then return false end
+
+    local ok, is_scoped = pcall(function()
+        local weapon = entity_get_player_weapon(lp)
+        if not weapon then return false end
+        return entity_get_prop(lp, "m_bIsScoped") == 1
+    end)
+
+    return ok and is_scoped == true
+end
+
+local function vm_editor_is_thirdperson()
+    if vm_editor_thirdperson_ref[1] == nil or vm_editor_thirdperson_ref[2] == nil then
+        return false
+    end
+
+    local ok, enabled, active = pcall(function()
+        return ui.get(vm_editor_thirdperson_ref[1]), ui.get(vm_editor_thirdperson_ref[2])
+    end)
+
+    return ok and enabled == true and active == true
+end
+
+local function vm_editor_apply_values(scoped, immediate)
+    local viewmodel = we_vars.viewmodel
+    local target_fov = vm_editor_clamp(viewmodel.fov, VM_EDITOR_FOV_MIN, VM_EDITOR_FOV_MAX)
+    local target_y = vm_editor_clamp(viewmodel.y, VM_EDITOR_Y_MIN, VM_EDITOR_Y_MAX) / 10
+    local target_z = vm_editor_clamp(viewmodel.z, VM_EDITOR_Z_MIN, VM_EDITOR_Z_MAX) / 10
+    local target_x
+
+    if scoped and rm.viewmodel_changer.scope_hide:get() then
+        target_x = vm_editor_clamp(viewmodel.scope_x, VM_EDITOR_X_MIN, VM_EDITOR_X_MAX) / 10
+    else
+        target_x = vm_editor_clamp(viewmodel.x, VM_EDITOR_X_MIN, VM_EDITOR_X_MAX) / 10
+    end
+
+    if viewmodel.current_fov == nil then
+        viewmodel.current_fov = target_fov
+        viewmodel.current_x = target_x
+        viewmodel.current_y = target_y
+        viewmodel.current_z = target_z
+    end
+
+    local factor = immediate and 1 or math_min(1, 12 * globals_frametime())
+
+    viewmodel.current_fov = viewmodel.current_fov + (target_fov - viewmodel.current_fov) * factor
+    viewmodel.current_x = viewmodel.current_x + (target_x - viewmodel.current_x) * factor
+    viewmodel.current_y = viewmodel.current_y + (target_y - viewmodel.current_y) * factor
+    viewmodel.current_z = viewmodel.current_z + (target_z - viewmodel.current_z) * factor
+
+    if math.abs(viewmodel.current_fov - target_fov) < 0.001 then viewmodel.current_fov = target_fov end
+    if math.abs(viewmodel.current_x - target_x) < 0.001 then viewmodel.current_x = target_x end
+    if math.abs(viewmodel.current_y - target_y) < 0.001 then viewmodel.current_y = target_y end
+    if math.abs(viewmodel.current_z - target_z) < 0.001 then viewmodel.current_z = target_z end
+
+    client_set_cvar("viewmodel_fov", viewmodel.current_fov)
+    client_set_cvar("viewmodel_offset_x", viewmodel.current_x)
+    client_set_cvar("viewmodel_offset_y", viewmodel.current_y)
+    client_set_cvar("viewmodel_offset_z", viewmodel.current_z)
+
+    if rm.viewmodel_changer.scope_hide:get() then
+        we_vars.scope_hide.x_current = viewmodel.current_x
+    end
+end
+
+local function vm_editor_apply_wheel_delta(wheel_delta)
+    if wheel_delta == 0 then return end
+
+    local scoped = vm_editor_is_scoped()
+    local shift = client_key_state(0x10) == true
+    local ctrl = client_key_state(0x11) == true
+
+    if shift then
+        local fov_step = ctrl and 1 or 2
+        vm_editor_set_value(
+            "fov",
+            we_vars.viewmodel.fov + wheel_delta * fov_step,
+            VM_EDITOR_FOV_MIN,
+            VM_EDITOR_FOV_MAX
+        )
+    else
+        local y_step = ctrl and 2 or 8
+        vm_editor_set_value(
+            "y",
+            we_vars.viewmodel.y + wheel_delta * y_step,
+            VM_EDITOR_Y_MIN,
+            VM_EDITOR_Y_MAX
+        )
+    end
+
+    vm_editor_apply_values(scoped)
+end
+
+local function vm_editor_apply_screen_error(error_x, error_y, scoped)
+    local ctrl = client_key_state(0x11) == true
+    local gain = ctrl and 0.018 or 0.055
+    local step_x = error_x * gain
+    local step_z = -error_y * gain
+
+    if math.abs(error_x) < 0.25 then
+        step_x = 0
+    end
+
+    if math.abs(error_y) < 0.25 then
+        step_z = 0
+    end
+
+    if step_x ~= 0 then
+        if scoped and rm.viewmodel_changer.scope_hide:get() then
+            vm_editor_set_value("scope_x", we_vars.viewmodel.scope_x + step_x, VM_EDITOR_X_MIN, VM_EDITOR_X_MAX)
+        else
+            vm_editor_set_value("x", we_vars.viewmodel.x + step_x, VM_EDITOR_X_MIN, VM_EDITOR_X_MAX)
+        end
+    end
+
+    if step_z ~= 0 then
+        vm_editor_set_value("z", we_vars.viewmodel.z + step_z, VM_EDITOR_Z_MIN, VM_EDITOR_Z_MAX)
+    end
+end
+
+we_cb.viewmodel_editor = function()
+    local editor = we_vars.viewmodel_editor
+
+    if not ui.is_menu_open()
+        or not rm.viewmodel_changer.override:get()
+        or vm_editor_is_thirdperson()
+    then
+        editor.dragging = false
+        editor.drag_start_mouse_x = nil
+        editor.drag_start_mouse_y = nil
+        editor.drag_grab_to_muzzle_x = nil
+        editor.drag_grab_to_muzzle_y = nil
+        return
+    end
+
+    local anchor_x, anchor_y = vm_editor_get_anchor()
+    if anchor_x == nil or anchor_y == nil then
+        editor.dragging = false
+        editor.drag_start_mouse_x = nil
+        editor.drag_start_mouse_y = nil
+        editor.last_x = nil
+        editor.last_y = nil
+        editor.drag_grab_to_muzzle_x = nil
+        editor.drag_grab_to_muzzle_y = nil
+        return
+    end
+
+    local mx, my = ui.mouse_position()
+    local x = anchor_x
+    local y = anchor_y
+
+    editor.last_x = x
+    editor.last_y = y
+
+    local hovered = vm_editor_is_hovered(mx, my)
+    local mouse_down = client_key_state(0x01) == true
+    local scoped = vm_editor_is_scoped()
+
+    if not mouse_down then
+        editor.dragging = false
+        editor.drag_start_mouse_x = nil
+        editor.drag_start_mouse_y = nil
+        editor.drag_grab_to_muzzle_x = nil
+        editor.drag_grab_to_muzzle_y = nil
+    elseif hovered and not editor.dragging then
+        editor.dragging = true
+        editor.drag_start_mouse_x = mx
+        editor.drag_start_mouse_y = my
+        editor.drag_grab_to_muzzle_x = anchor_x + editor.w - mx
+        editor.drag_grab_to_muzzle_y = anchor_y + editor.h - my
+    end
+
+    if editor.dragging and editor.drag_grab_to_muzzle_x ~= nil and editor.drag_grab_to_muzzle_y ~= nil then
+        local current_muzzle_x = anchor_x + editor.w
+        local current_muzzle_y = anchor_y + editor.h
+        local target_muzzle_x = mx + editor.drag_grab_to_muzzle_x
+        local target_muzzle_y = my + editor.drag_grab_to_muzzle_y
+        local error_x = target_muzzle_x - current_muzzle_x
+        local error_y = target_muzzle_y - current_muzzle_y
+
+        vm_editor_apply_screen_error(error_x, error_y, scoped)
+        vm_editor_apply_values(scoped, true)
+    end
+
+    local capture_mouse = hovered or editor.dragging
+    if capture_mouse then
+        vm_editor_capture_input()
+    end
+
+    local wheel_delta = capture_mouse and vm_editor_get_wheel_delta() or 0
+    if wheel_delta ~= 0 then
+        vm_editor_apply_wheel_delta(wheel_delta)
+    end
+
+    local r, g, b = hovered and 35 or 18, hovered and 35 or 18, hovered and 35 or 18
+    renderer_rectangle(x, y, editor.w, editor.h, r, g, b, 145)
+    renderer_rectangle(x, y - 2, editor.w, 2, 160, 220, 40, 220)
+    renderer_text(x + 3, y + 4, 235, 235, 235, 235, '-', nil, 'VIEWMODEL')
+    renderer_text(x + 6, y + 22, 190, 190, 190, 225, '', nil, 'drag: X/Z')
+    renderer_text(x + 6, y + 37, 190, 190, 190, 225, '', nil, 'wheel: Y')
+
+    local scoped_x = scoped and rm.viewmodel_changer.scope_hide:get()
+    local x_value = scoped_x and we_vars.viewmodel.scope_x or we_vars.viewmodel.x
+    local x_label = scoped_x and 'SX %.1f' or 'X %.1f'
+    renderer_text(x + 76, y + 22, 215, 215, 215, 230, '', nil, string_format(x_label, x_value / 10))
+    renderer_text(x + 76, y + 37, 215, 215, 215, 230, '', nil, string_format('Z %.1f', we_vars.viewmodel.z / 10))
+end
+
 we_cb.viewmodel_in_scope = function()
     client_set_cvar("fov_cs_debug", rm.viewmodel_in_scope:get() and 90 or 0)
 end
 
 we_cb.viewmodel_changer = function()
-    we_vars.scope_hide.x_current = nil
     if not rm.viewmodel_changer.override:get() then
+        we_vars.viewmodel.current_fov = nil
+        we_vars.viewmodel.current_x = nil
+        we_vars.viewmodel.current_y = nil
+        we_vars.viewmodel.current_z = nil
+        we_vars.scope_hide.x_current = nil
         client_set_cvar("viewmodel_fov",      we_vars.viewmodel.old_fov)
         client_set_cvar("viewmodel_offset_x", we_vars.viewmodel.old_x)
         client_set_cvar("viewmodel_offset_y", we_vars.viewmodel.old_y)
         client_set_cvar("viewmodel_offset_z", we_vars.viewmodel.old_z)
         return
     end
-    client_set_cvar("viewmodel_fov",      rm.viewmodel_changer.fov:get())
-    client_set_cvar("viewmodel_offset_x", rm.viewmodel_changer.x:get() / 10)
-    client_set_cvar("viewmodel_offset_y", rm.viewmodel_changer.y:get() / 10)
-    client_set_cvar("viewmodel_offset_z", rm.viewmodel_changer.z:get() / 10)
+
+    vm_editor_apply_values(vm_editor_is_scoped())
 end
 
-local SCOPE_WEAPONS = {
-    weapon_awp   = true,
-    weapon_ssg08 = true,
-    weapon_scar20 = true,
-    weapon_aug   = true,
-    weapon_sg556 = true,
-}
-
 we_cb.scope_hide_update = function()
-    if not rm.viewmodel_changer.override:get() or not rm.viewmodel_changer.scope_hide:get() then
+    if not rm.viewmodel_changer.override:get() then
         we_vars.scope_hide.x_current = nil
         return
     end
 
-    local lp = entity_get_local_player()
-    if not lp then return end
-
-    local ok, is_scoped = pcall(function()
-        local weapon = entity_get_player_weapon(lp)
-        if not weapon then return false end
-        if not SCOPE_WEAPONS[entity_get_classname(weapon) or ''] then return false end
-        return entity_get_prop(lp, "DT_CSPlayer", "m_bIsScoped") == 1
-    end)
-    if not ok then return end
-
-    local base_x  = rm.viewmodel_changer.x:get() / 10
-    local target_x = is_scoped and -15 or base_x
-
-    if we_vars.scope_hide.x_current == nil then
-        we_vars.scope_hide.x_current = base_x
-    end
-
-    local speed  = rm.viewmodel_changer.scope_speed:get()
-    local factor = math.min(1, speed * globals_frametime())
-    local new_x  = we_vars.scope_hide.x_current + (target_x - we_vars.scope_hide.x_current) * factor
-
-    if math.abs(new_x - target_x) < 0.001 then
-        new_x = target_x
-    end
-
-    if new_x ~= we_vars.scope_hide.x_current then
-        we_vars.scope_hide.x_current = new_x
-        client_set_cvar("viewmodel_offset_x", new_x)
-    end
+    vm_editor_apply_values(vm_editor_is_scoped())
 end
 
 we_cb.remove_sleeves = function()
@@ -750,10 +1180,6 @@ local function we_setup()
     rm.aspect_ratio.value:set_callback(we_cb.aspect_ratio)
     rm.viewmodel_in_scope:set_callback(we_cb.viewmodel_in_scope)
     rm.viewmodel_changer.override:set_callback(we_cb.viewmodel_changer)
-    rm.viewmodel_changer.fov:set_callback(we_cb.viewmodel_changer)
-    rm.viewmodel_changer.x:set_callback(we_cb.viewmodel_changer)
-    rm.viewmodel_changer.y:set_callback(we_cb.viewmodel_changer)
-    rm.viewmodel_changer.z:set_callback(we_cb.viewmodel_changer)
     rm.remove_sleeves:set_callback(we_cb.remove_sleeves)
 
     rm.custom_scope.enable:set_callback(function()
@@ -787,7 +1213,38 @@ client.set_event_callback("paint", function()
     we_cb.scope_hide_update()
 end)
 
-client.set_event_callback("paint_ui", we_cb.draw_scope_ui)
+client.set_event_callback("paint_ui", function()
+    we_cb.draw_scope_ui()
+    we_cb.viewmodel_editor()
+end)
+
+client.set_event_callback("setup_command", function(cmd)
+    if not vm_editor_should_block_input() then
+        return
+    end
+
+    cmd.in_attack = 0
+    cmd.in_attack2 = 0
+    cmd.in_attack3 = 0
+    cmd.in_weapon1 = 0
+    cmd.in_weapon2 = 0
+    cmd.weaponselect = 0
+    cmd.weaponsubtype = 0
+end)
+
+client.set_event_callback("string_cmd", function(cmd)
+    if not vm_editor_should_block_input() then
+        return
+    end
+
+    if cmd == "invnext"
+        or cmd == "invprev"
+        or cmd == "+jump"
+        or cmd == "-jump"
+    then
+        return true
+    end
+end)
 
 client.set_event_callback("player_connect_full", function(event)
     if client_userid_to_entindex(event.userid) == entity_get_local_player() then

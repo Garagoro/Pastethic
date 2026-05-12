@@ -593,6 +593,7 @@ local antiaim = { } do
 
         local pitch_inverted = false
         local modifier_delay_ticks = 0
+        local yaw_history = {}
         local defensive_trigger_state = {
             items = nil,
             from = nil,
@@ -613,6 +614,88 @@ local antiaim = { } do
             end
 
             return false
+        end
+
+        local function get_angle_distance(a, b)
+            return math.abs(utils.normalize((a or 0) - (b or 0), -180, 180))
+        end
+
+        local function prune_yaw_history(max_ticks)
+            local tickcount = globals.tickcount()
+
+            for i = #yaw_history, 1, -1 do
+                local record = yaw_history[i]
+
+                if record == nil or tickcount - record.tick > max_ticks then
+                    table.remove(yaw_history, i)
+                end
+            end
+        end
+
+        local function get_yaw_history_gap(candidate, max_ticks)
+            prune_yaw_history(max_ticks)
+
+            local closest = 180
+
+            for i = 1, #yaw_history do
+                local record = yaw_history[i]
+                closest = math.min(closest, get_angle_distance(candidate, record.yaw))
+            end
+
+            return closest
+        end
+
+        local function remember_defensive_yaw(yaw, max_ticks)
+            prune_yaw_history(max_ticks)
+
+            yaw_history[#yaw_history + 1] = {
+                tick = globals.tickcount(),
+                yaw = utils.normalize(yaw or 0, -180, 180)
+            }
+
+            while #yaw_history > 18 do
+                table.remove(yaw_history, 1)
+            end
+        end
+
+        local function avoid_repeated_defensive_yaw(yaw, defensive_data)
+            if yaw == nil then
+                return nil
+            end
+
+            local max_ticks = math.max(4, math.min(defensive_data.max or 8, 14))
+            local preferred_yaw = utils.normalize(yaw, -180, 180)
+            local desired_gap = 22
+
+            if get_yaw_history_gap(preferred_yaw, max_ticks) >= desired_gap then
+                remember_defensive_yaw(preferred_yaw, max_ticks)
+                return preferred_yaw
+            end
+
+            local best_yaw = preferred_yaw
+            local best_score = -1
+            local scan_range = 58
+            local scan_step = 4
+
+            for delta = -scan_range, scan_range, scan_step do
+                local candidate = utils.normalize(preferred_yaw + delta, -180, 180)
+                local gap = get_yaw_history_gap(candidate, max_ticks)
+                local gap_score = utils.clamp(gap / desired_gap, 0, 1)
+                local prefer_score = 1 - utils.clamp(math.abs(delta) / scan_range, 0, 1)
+                local score = gap_score * 0.72 + prefer_score * 0.28
+
+                if gap < desired_gap * 0.6 then
+                    score = score - 0.40
+                end
+
+                if score > best_score then
+                    best_score = score
+                    best_yaw = candidate
+                end
+            end
+
+            remember_defensive_yaw(best_yaw, max_ticks)
+            return best_yaw
         end
 
         local function has_trigger(items, name)
@@ -1082,6 +1165,7 @@ local antiaim = { } do
             defensive_trigger_state.active_left = 0
             defensive_trigger_state.last_command = nil
             defensive_trigger_state.last_active = false
+            yaw_history = {}
         end
 
         local function get_trigger_cycle_settings(items)
@@ -1213,6 +1297,13 @@ local antiaim = { } do
             update_body_yaw(buffer_ctx, items)
             update_pitch(buffer_ctx, items)
             update_yaw(buffer_ctx, items)
+
+            if buffer_ctx.yaw_offset ~= nil then
+                buffer_ctx.yaw_offset = avoid_repeated_defensive_yaw(
+                    buffer_ctx.yaw_offset,
+                    defensive_data
+                )
+            end
 
             buffer.defensive = buffer_ctx
 
