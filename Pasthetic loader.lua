@@ -177,6 +177,20 @@ local function entry_path(path)
     return path:gsub('/', '\\')
 end
 
+local function should_skip_manifest_entry(entry)
+    if type(entry) ~= 'table' then
+        return true
+    end
+
+    local path = entry.path
+    if type(path) ~= 'string' then
+        return true
+    end
+
+    path = path:gsub('\\', '/')
+    return path:match('/%.gitkeep$') ~= nil or (type(entry.size) == 'number' and entry.size == 0)
+end
+
 local function um_http_get(url, callback)
     local ok, http = pcall(require, 'gamesense/http')
     if not ok or type(http) ~= 'table' or type(http.get) ~= 'function' then
@@ -250,19 +264,21 @@ local function compare_manifest(manifest)
     end
     for i = 1, #manifest.files do
         local entry = manifest.files[i]
-        local local_entry_path = entry_path(entry.path)
-        local ok_read, body = false, nil
-        if local_entry_path ~= nil and readfile ~= nil then
-            ok_read, body = pcall(readfile, local_path(local_entry_path))
-        end
-        if local_entry_path == nil then
-            pending[#pending + 1] = { entry = entry, reason = 'bad path' }
-        elseif not ok_read or type(body) ~= 'string' then
-            pending[#pending + 1] = { entry = entry, reason = 'missing' }
-        elseif type(entry.size) == 'number' and #body ~= entry.size then
-            pending[#pending + 1] = { entry = entry, reason = 'size' }
-        elseif type(entry.checksum) == 'string' and adler32(body) ~= entry.checksum then
-            pending[#pending + 1] = { entry = entry, reason = 'checksum' }
+        if not should_skip_manifest_entry(entry) then
+            local local_entry_path = entry_path(entry.path)
+            local ok_read, body = false, nil
+            if local_entry_path ~= nil and readfile ~= nil then
+                ok_read, body = pcall(readfile, local_path(local_entry_path))
+            end
+            if local_entry_path == nil then
+                pending[#pending + 1] = { entry = entry, reason = 'bad path' }
+            elseif not ok_read or type(body) ~= 'string' then
+                pending[#pending + 1] = { entry = entry, reason = 'missing' }
+            elseif type(entry.size) == 'number' and #body ~= entry.size then
+                pending[#pending + 1] = { entry = entry, reason = 'size' }
+            elseif type(entry.checksum) == 'string' and adler32(body) ~= entry.checksum then
+                pending[#pending + 1] = { entry = entry, reason = 'checksum' }
+            end
         end
     end
     return pending, true
@@ -432,23 +448,27 @@ function update_manager.download(callback)
 
     for i = 1, #files do
         local entry     = files[i].entry or files[i]
-        local local_entry_path = entry_path(entry.path)
-        if local_entry_path == nil then
-            finish_one(false)
+        if should_skip_manifest_entry(entry) then
+            finish_one(true)
         else
-            local target_path = local_path(local_entry_path)
-            local urls = {}
-            for j = 1, #base_urls do
-                urls[#urls + 1] = base_urls[j] .. entry.path
+            local local_entry_path = entry_path(entry.path)
+            if local_entry_path == nil then
+                finish_one(false)
+            else
+                local target_path = local_path(local_entry_path)
+                local urls = {}
+                for j = 1, #base_urls do
+                    urls[#urls + 1] = base_urls[j] .. entry.path
+                end
+                local requested = um_http_get_first(urls, function(file_body)
+                    if type(file_body) ~= 'string' then finish_one(false) return end
+                    if type(entry.size) == 'number' and #file_body ~= entry.size then finish_one(false) return end
+                    if type(entry.checksum) == 'string' and adler32(file_body) ~= entry.checksum then finish_one(false) return end
+                    create_parent_dirs(target_path)
+                    finish_one(writefile ~= nil and pcall(writefile, target_path, file_body))
+                end)
+                if not requested then finish_one(false) end
             end
-            local requested = um_http_get_first(urls, function(file_body)
-                if type(file_body) ~= 'string' then finish_one(false) return end
-                if type(entry.size) == 'number' and #file_body ~= entry.size then finish_one(false) return end
-                if type(entry.checksum) == 'string' and adler32(file_body) ~= entry.checksum then finish_one(false) return end
-                create_parent_dirs(target_path)
-                finish_one(writefile ~= nil and pcall(writefile, target_path, file_body))
-            end)
-            if not requested then finish_one(false) end
         end
     end
 
