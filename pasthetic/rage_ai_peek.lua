@@ -90,6 +90,22 @@ function M.start(deps)
         return make_vec(entity.get_prop(player, 'm_vecVelocity')) or vector()
     end
 
+    local function get_eye_position(player)
+        local eye = make_vec(entity.hitbox_position(player, 0))
+
+        if eye ~= nil then
+            return eye
+        end
+
+        local origin = get_origin(player)
+
+        if origin == nil then
+            return nil
+        end
+
+        return origin + vector(0, 0, 64)
+    end
+
     local function get_speed2d(velocity)
         return math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y)
     end
@@ -344,6 +360,75 @@ function M.start(deps)
         end
 
         return players
+    end
+
+    local function get_threats()
+        local players = {}
+        local list = entity.get_players(true)
+
+        for i = 1, #list do
+            local ent = list[i]
+
+            if ent ~= nil and entity.is_alive(ent) and not entity.is_dormant(ent) then
+                players[#players + 1] = ent
+            end
+        end
+
+        return players
+    end
+
+    local function get_local_damage_points_at(pos)
+        return {
+            pos + vector(0, 0, 64),
+            pos + vector(0, 0, 54),
+            pos + vector(0, 0, 42),
+            pos + vector(0, 0, 34)
+        }
+    end
+
+    local function evaluate_position_safety(me, pos)
+        local max_damage = 0
+        local exposure_count = 0
+        local bad_record_exposure = 0
+        local threats = get_threats()
+        local local_points = get_local_damage_points_at(pos)
+
+        for i = 1, #threats do
+            local threat = threats[i]
+            local eye = get_eye_position(threat)
+            local threat_damage = 0
+
+            if eye ~= nil then
+                for j = 1, #local_points do
+                    local point = local_points[j]
+                    local hit_ent, damage = client.trace_bullet(
+                        threat,
+                        eye.x, eye.y, eye.z,
+                        point.x, point.y, point.z,
+                        false
+                    )
+
+                    if hit_ent == me and damage ~= nil then
+                        threat_damage = math.max(threat_damage, damage)
+                    end
+                end
+            end
+
+            if threat_damage > 5 then
+                exposure_count = exposure_count + 1
+                max_damage = math.max(max_damage, threat_damage)
+
+                if is_garbage_record(threat) then
+                    bad_record_exposure = bad_record_exposure + 1
+                end
+            end
+        end
+
+        return {
+            incoming_damage = max_damage,
+            exposure_count = exposure_count,
+            bad_record_exposure = bad_record_exposure
+        }
     end
 
     local function move_to(cmd, pos)
@@ -602,6 +687,7 @@ function M.start(deps)
                     local targets = get_targets()
                     local hitboxes = get_active_hitboxes()
                     local min_damage = get_min_damage()
+                    local safety = nil
 
                     for _, target in next, targets do
                         if is_garbage_record(target) then
@@ -638,6 +724,10 @@ function M.start(deps)
                                 if (hit_ent == nil or target == hit_ent)
                                     and (trace_damage >= min_damage or health <= trace_damage)
                                 then
+                                    if safety == nil then
+                                        safety = evaluate_position_safety(me, point.position)
+                                    end
+
                                     local target_origin = get_origin(target)
 
                                     if target_origin ~= nil then
@@ -647,7 +737,10 @@ function M.start(deps)
                                             damage = trace_damage,
                                             lethal = health <= trace_damage,
                                             move_distance = origin:dist2d(point.position),
-                                            target_distance = start:dist(target_origin)
+                                            target_distance = start:dist(target_origin),
+                                            incoming_damage = safety.incoming_damage,
+                                            exposure_count = safety.exposure_count,
+                                            bad_record_exposure = safety.bad_record_exposure
                                         }
                                     end
 
@@ -663,16 +756,28 @@ function M.start(deps)
         end
 
         table.sort(aipeek.data.aim, function(a, b)
+            if a.bad_record_exposure ~= b.bad_record_exposure then
+                return (a.bad_record_exposure or 0) < (b.bad_record_exposure or 0)
+            end
+
+            if a.exposure_count ~= b.exposure_count then
+                return (a.exposure_count or 0) < (b.exposure_count or 0)
+            end
+
+            if a.incoming_damage ~= b.incoming_damage then
+                return (a.incoming_damage or 0) < (b.incoming_damage or 0)
+            end
+
             if a.lethal ~= b.lethal then
                 return a.lethal == true
             end
 
-            if a.damage ~= b.damage then
-                return (a.damage or 0) > (b.damage or 0)
-            end
-
             if a.move_distance ~= b.move_distance then
                 return (a.move_distance or 0) < (b.move_distance or 0)
+            end
+
+            if a.damage ~= b.damage then
+                return (a.damage or 0) > (b.damage or 0)
             end
 
             return (a.target_distance or a.start:dist(a['end'])) < (b.target_distance or b.start:dist(b['end']))
