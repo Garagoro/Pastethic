@@ -9,6 +9,25 @@ local function log_loader_reinstall_hint()
     end
 end
 
+local function can_read_file(path)
+    if readfile == nil then
+        return false
+    end
+
+    local ok, result = pcall(readfile, path)
+    return ok and type(result) == 'string'
+end
+
+local LOCAL_PREFIX = can_read_file('pasthetic\\core.lua') and '' or (can_read_file('pasthetic\\pasthetic\\core.lua') and 'pasthetic\\' or '')
+
+local function local_path(path)
+    if LOCAL_PREFIX == '' or type(path) ~= 'string' or path == '' then
+        return path
+    end
+
+    return LOCAL_PREFIX .. path
+end
+
 local function require_pasthetic_module(name)
     if package ~= nil and package.loaded ~= nil then
         package.loaded[name] = nil
@@ -26,11 +45,11 @@ local function require_pasthetic_module(name)
     end
 
     local path = name:gsub('/', '\\') .. '.lua'
-    local source = readfile(path)
+    local source = readfile(local_path(path))
 
     if source == nil then
         local nested_path = 'pasthetic\\' .. path
-        source = readfile(nested_path)
+        source = readfile(local_path(nested_path))
 
         if source ~= nil then
             path = nested_path
@@ -82,7 +101,7 @@ local BASE_URLS = {
     'https://raw.githubusercontent.com/Garagoro/Pasthetic/refs/heads/main/',
     'https://cdn.jsdelivr.net/gh/Garagoro/Pasthetic@main/',
 }
-local MANIFEST_PATH = 'pasthetic\\manifest.json'
+local MANIFEST_PATH = local_path('manifest.json')
 
 local _create_dir
 do
@@ -231,12 +250,12 @@ local function compare_manifest(manifest)
     end
     for i = 1, #manifest.files do
         local entry = manifest.files[i]
-        local local_path = entry_path(entry.path)
+        local local_entry_path = entry_path(entry.path)
         local ok_read, body = false, nil
-        if local_path ~= nil and readfile ~= nil then
-            ok_read, body = pcall(readfile, local_path)
+        if local_entry_path ~= nil and readfile ~= nil then
+            ok_read, body = pcall(readfile, local_path(local_entry_path))
         end
-        if local_path == nil then
+        if local_entry_path == nil then
             pending[#pending + 1] = { entry = entry, reason = 'bad path' }
         elseif not ok_read or type(body) ~= 'string' then
             pending[#pending + 1] = { entry = entry, reason = 'missing' }
@@ -396,10 +415,11 @@ function update_manager.download(callback)
 
     for i = 1, #files do
         local entry     = files[i].entry or files[i]
-        local local_path = entry_path(entry.path)
-        if local_path == nil then
+        local local_entry_path = entry_path(entry.path)
+        if local_entry_path == nil then
             finish_one(false)
         else
+            local target_path = local_path(local_entry_path)
             local urls = {}
             for j = 1, #base_urls do
                 urls[#urls + 1] = base_urls[j] .. entry.path
@@ -408,8 +428,8 @@ function update_manager.download(callback)
                 if type(file_body) ~= 'string' then finish_one(false) return end
                 if type(entry.size) == 'number' and #file_body ~= entry.size then finish_one(false) return end
                 if type(entry.checksum) == 'string' and adler32(file_body) ~= entry.checksum then finish_one(false) return end
-                create_parent_dirs(local_path)
-                finish_one(writefile ~= nil and pcall(writefile, local_path, file_body))
+                create_parent_dirs(target_path)
+                finish_one(writefile ~= nil and pcall(writefile, target_path, file_body))
             end)
             if not requested then finish_one(false) end
         end
@@ -424,7 +444,7 @@ end
 
 do
     local installed = readfile ~= nil and (function()
-        local ok, result = pcall(readfile, 'pasthetic\\core.lua')
+        local ok, result = pcall(readfile, local_path('pasthetic\\core.lua'))
         return ok and type(result) == 'string'
     end)()
 
@@ -485,6 +505,7 @@ local bundle_loader_deps = {
     client = client,
     readfile = readfile,
     loadstring = loadstring,
+    local_path = local_path,
     patches = pasthetic_bundle_patches
 }
 

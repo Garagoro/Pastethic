@@ -16,13 +16,14 @@ function M.load(deps, label, paths)
     local client = deps.client
     local readfile = deps.readfile
     local loadstring = deps.loadstring
+    local local_path = deps.local_path or function(path) return path end
     local patches = deps.patches
 
     if loadstring == nil then
         log_err(client, 'cannot load bundled ' .. label .. ': loadstring unavailable')
         return false
     end
-    local bundled_path = 'pasthetic\\bundles\\' .. label
+    local bundled_path = local_path('pasthetic\\bundles\\' .. label)
     local search_paths = { bundled_path }
 
     for i = 1, #paths do
