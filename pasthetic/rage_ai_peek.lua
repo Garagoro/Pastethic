@@ -56,7 +56,9 @@ function M.start(deps)
     local COMMIT_EXPOSURE_DAMAGE = 5
     local COMMIT_LOCK_TICKS = 6
     local COMMIT_DISTANCE = 8
-    local RETURN_CLEAR_DISTANCE = 4
+    local SAFE_RESCAN_TICKS = 4
+    local RETURN_RESUME_SPEED = 55
+    local MANUAL_RESET_DISTANCE_MIN = 160
     local AI_PEEK_TARGET_SELECTION = 'Best hit chance'
 
     local function safe_get(item, fallback)
@@ -444,6 +446,13 @@ function M.start(deps)
                 or (safety.exposure_count or 0) > 0)
     end
 
+    local function is_full_safe(safety)
+        return safety ~= nil
+            and (safety.incoming_damage or 0) <= 0
+            and (safety.exposure_count or 0) <= 0
+            and (safety.bad_record_exposure or 0) <= 0
+    end
+
     local function is_commit_candidate_safe(candidate, current_safety)
         if candidate == nil or candidate.start == nil then
             return false
@@ -500,6 +509,7 @@ function M.start(deps)
         end
 
         aipeek.data.native_return = true
+        aipeek.data.safe_rescan_ticks = 0
         clear_commit()
         restore_target_selection()
     end
@@ -751,10 +761,59 @@ function M.start(deps)
             start_native_return()
         end
 
-        if origin:dist(aipeek.data.positions.center) <= RETURN_CLEAR_DISTANCE then
-            aipeek.data.native_return = false
+        local center_distance = origin:dist2d(aipeek.data.positions.center)
+        local tickcount = globals.tickcount()
+
+        if not aipeek.data.native_return and aipeek.data.commit == nil then
+            local reset_distance = math.max(ref.distance:get() * 2.25, MANUAL_RESET_DISTANCE_MIN)
+
+            if center_distance > reset_distance then
+                reset()
+                return
+            end
+        end
+
+        if aipeek.data.native_return then
+            local current_safety = evaluate_position_safety(me, origin)
+            local stable_speed = get_speed2d(get_velocity(me)) <= RETURN_RESUME_SPEED
+
+            if is_full_safe(current_safety) and stable_speed then
+                aipeek.data.safe_rescan_ticks = (aipeek.data.safe_rescan_ticks or 0) + 1
+            else
+                aipeek.data.safe_rescan_ticks = 0
+            end
+
+            if (aipeek.data.safe_rescan_ticks or 0) >= SAFE_RESCAN_TICKS then
+                aipeek.data.native_return = false
+                aipeek.data.safe_rescan_ticks = 0
+                clear_commit()
+                restore_target_selection()
+            end
+
+            return
+        end
+
+        local active_commit = aipeek.data.commit
+
+        if active_commit ~= nil and active_commit.until_tick < tickcount then
+            if center_distance > COMMIT_DISTANCE then
+                start_native_return()
+                return
+            end
+
             clear_commit()
-            restore_target_selection()
+        end
+
+        if not ready_shot_local() then
+            aipeek.data.safe_rescan_ticks = 0
+
+            if center_distance > COMMIT_DISTANCE then
+                start_native_return()
+                return
+            end
+
+            clear_commit()
+            return
         end
 
         if not aipeek.data.native_return then
@@ -767,75 +826,73 @@ function M.start(deps)
                     damage = 0
                 }
 
-                if ready_shot_local() then
-                    local start = vector_copy(point.position) + vector(0, 0, 64)
-                    local targets = get_targets()
-                    local hitboxes = get_active_hitboxes()
-                    local min_damage = get_min_damage()
-                    local safety = nil
+                local start = vector_copy(point.position) + vector(0, 0, 64)
+                local targets = get_targets()
+                local hitboxes = get_active_hitboxes()
+                local min_damage = get_min_damage()
+                local safety = nil
 
-                    for _, target in next, targets do
-                        if is_garbage_record(target) then
-                            goto skip_target
-                        end
+                for _, target in next, targets do
+                    if is_garbage_record(target) then
+                        goto skip_target
+                    end
 
-                        local health = entity.get_prop(target, 'm_iHealth') or 0
+                    local health = entity.get_prop(target, 'm_iHealth') or 0
 
-                        for hitbox_id in next, hitboxes do
-                            local velocity = get_velocity(target)
-                            local hitbox_pos = make_vec(entity.hitbox_position(target, hitbox_id))
+                    for hitbox_id in next, hitboxes do
+                        local velocity = get_velocity(target)
+                        local hitbox_pos = make_vec(entity.hitbox_position(target, hitbox_id))
 
-                            if hitbox_pos ~= nil then
-                                local predicted = extrapolate(
-                                    hitbox_pos,
-                                    velocity,
-                                    ref.prediction:get()
-                                )
-                                local hit_ent, damage = client.trace_bullet(
-                                    me,
-                                    start.x, start.y, start.z,
-                                    predicted.x, predicted.y, predicted.z
-                                )
-                                local trace_damage = damage or 0
+                        if hitbox_pos ~= nil then
+                            local predicted = extrapolate(
+                                hitbox_pos,
+                                velocity,
+                                ref.prediction:get()
+                            )
+                            local hit_ent, damage = client.trace_bullet(
+                                me,
+                                start.x, start.y, start.z,
+                                predicted.x, predicted.y, predicted.z
+                            )
+                            local trace_damage = damage or 0
 
-                                if not hit_ent then
-                                    point[1].damage = total_damage
-                                elseif target == hit_ent then
-                                    point[1].damage = total_damage < trace_damage and trace_damage or total_damage
+                            if not hit_ent then
+                                point[1].damage = total_damage
+                            elseif target == hit_ent then
+                                point[1].damage = total_damage < trace_damage and trace_damage or total_damage
+                            end
+
+                            total_damage = point[1].damage
+
+                            if (hit_ent == nil or target == hit_ent)
+                                and (trace_damage >= min_damage or health <= trace_damage)
+                            then
+                                if safety == nil then
+                                    safety = evaluate_position_safety(me, point.position)
                                 end
 
-                                total_damage = point[1].damage
+                                local target_origin = get_origin(target)
 
-                                if (hit_ent == nil or target == hit_ent)
-                                    and (trace_damage >= min_damage or health <= trace_damage)
-                                then
-                                    if safety == nil then
-                                        safety = evaluate_position_safety(me, point.position)
-                                    end
-
-                                    local target_origin = get_origin(target)
-
-                                    if target_origin ~= nil then
-                                        aipeek.data.aim[#aipeek.data.aim + 1] = {
-                                            start = start,
-                                            ['end'] = target_origin,
-                                            damage = trace_damage,
-                                            lethal = health <= trace_damage,
-                                            move_distance = origin:dist2d(point.position),
-                                            target_distance = start:dist(target_origin),
-                                            incoming_damage = safety.incoming_damage,
-                                            exposure_count = safety.exposure_count,
-                                            bad_record_exposure = safety.bad_record_exposure
-                                        }
-                                    end
-
-                                    point[1].hitbox[hitbox_id] = predicted
+                                if target_origin ~= nil then
+                                    aipeek.data.aim[#aipeek.data.aim + 1] = {
+                                        start = start,
+                                        ['end'] = target_origin,
+                                        damage = trace_damage,
+                                        lethal = health <= trace_damage,
+                                        move_distance = origin:dist2d(point.position),
+                                        target_distance = start:dist(target_origin),
+                                        incoming_damage = safety.incoming_damage,
+                                        exposure_count = safety.exposure_count,
+                                        bad_record_exposure = safety.bad_record_exposure
+                                    }
                                 end
+
+                                point[1].hitbox[hitbox_id] = predicted
                             end
                         end
-
-                        ::skip_target::
                     end
+
+                    ::skip_target::
                 end
             end
         end
@@ -872,7 +929,6 @@ function M.start(deps)
         local best_aim = aipeek.data.aim[1]
 
         if not aipeek.data.native_return then
-            local center_distance = origin:dist2d(aipeek.data.positions.center)
             local current_safety = center_distance > COMMIT_DISTANCE
                 and evaluate_position_safety(me, origin)
                 or nil
@@ -880,7 +936,6 @@ function M.start(deps)
 
             if commit_point then
                 local commit = aipeek.data.commit
-                local tickcount = globals.tickcount()
 
                 if commit ~= nil and commit.until_tick >= tickcount then
                     move_to_pos = commit.position
