@@ -542,8 +542,9 @@ function M.start(deps)
 
     local remove_vac_panel = panorama.loadstring([[
         var hidden_panels = [];
-        var closed_insecure_popup = false;
-        var closed_legacy_popup = false;
+        var insecure_popup_close_at = 0;
+        var legacy_popup_close_at = 0;
+        var POPUP_CLOSE_COOLDOWN_MS = 1500;
 
         var LEGACY_TEXT_MATCHES = [
             'legacy version of cs:go',
@@ -608,7 +609,8 @@ function M.start(deps)
         };
 
         var _ShouldCloseInsecurePopup = function() {
-            if (closed_insecure_popup) {
+            var now = Date.now();
+            if (now < insecure_popup_close_at) {
                 return false;
             }
 
@@ -618,7 +620,8 @@ function M.start(deps)
         };
 
         var _ShouldCloseLegacyPopup = function() {
-            if (closed_legacy_popup) {
+            var now = Date.now();
+            if (now < legacy_popup_close_at) {
                 return false;
             }
 
@@ -633,13 +636,13 @@ function M.start(deps)
 
         var _CloseTargetInfoPopups = function() {
             if (_ShouldCloseInsecurePopup()) {
-                closed_insecure_popup = true;
+                insecure_popup_close_at = Date.now() + POPUP_CLOSE_COOLDOWN_MS;
                 try { UiToolkitAPI.CloseAllVisiblePopups(); } catch (e) {}
                 return true;
             }
 
             if (_ShouldCloseLegacyPopup()) {
-                closed_legacy_popup = true;
+                legacy_popup_close_at = Date.now() + POPUP_CLOSE_COOLDOWN_MS;
                 try { UiToolkitAPI.CloseAllVisiblePopups(); } catch (e) {}
                 return true;
             }

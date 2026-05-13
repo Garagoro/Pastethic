@@ -465,7 +465,7 @@ local resource do
             local auto_whitelist_broken_lc = { } do
                 auto_whitelist_broken_lc.enabled = config_system.push(
                     'Ragebot', 'auto_whitelist_broken_lc.enabled', menu.new(
-                        ui.new_checkbox, 'AA', 'Anti-aimbot angles', new_key('Auto whitelist broken LC', 'auto_whitelist_broken_lc')
+                        ui.new_checkbox, 'AA', 'Anti-aimbot angles', new_key('Bad record handler', 'auto_whitelist_broken_lc')
                     )
                 )
 
@@ -648,6 +648,115 @@ local resource do
                 ragebot.peek_assist = peek_assist
             end
 
+            local ai_peek = { } do
+                ai_peek.enabled = config_system.push(
+                    'Ragebot', 'ai_peek.enabled', menu.new(
+                        ui.new_checkbox, 'AA', 'Other', new_key('AI peek', 'ai_peek')
+                    )
+                )
+
+                ai_peek.hotkey = config_system.push(
+                    'Ragebot', 'ai_peek.hotkey', menu.new(
+                        ui.new_hotkey, 'AA', 'Other', new_key('Hotkey', 'ai_peek'), true
+                    )
+                )
+
+                ai_peek.min_damage_label = menu.new(
+                    ui.new_label, 'AA', 'Other', new_key('Minimum damage key', 'ai_peek')
+                )
+
+                ai_peek.min_damage_override = config_system.push(
+                    'Ragebot', 'ai_peek.min_damage_override', menu.new(
+                        ui.new_hotkey, 'AA', 'Other', new_key('\n', 'ai_peek.min_damage_override'), true
+                    )
+                )
+
+                ai_peek.scan_all = config_system.push(
+                    'Ragebot', 'ai_peek.scan_all', menu.new(
+                        ui.new_checkbox, 'AA', 'Other', new_key('Scan all players', 'ai_peek')
+                    )
+                )
+
+                ai_peek.live_scan = config_system.push(
+                    'Ragebot', 'ai_peek.live_scan', menu.new(
+                        ui.new_checkbox, 'AA', 'Other', new_key('Live angle scan', 'ai_peek')
+                    )
+                )
+
+                ai_peek.distance = config_system.push(
+                    'Ragebot', 'ai_peek.distance', menu.new(
+                        ui.new_slider, 'AA', 'Other', new_key('Distance', 'ai_peek'), 25, 100, 70, true, 'u'
+                    )
+                )
+
+                ai_peek.separation = config_system.push(
+                    'Ragebot', 'ai_peek.separation', menu.new(
+                        ui.new_slider, 'AA', 'Other', new_key('Separation', 'ai_peek'), 2, 8, 2
+                    )
+                )
+
+                ai_peek.count = config_system.push(
+                    'Ragebot', 'ai_peek.count', menu.new(
+                        ui.new_slider, 'AA', 'Other', new_key('Count', 'ai_peek'), 1, 10, 2
+                    )
+                )
+
+                ai_peek.prediction = config_system.push(
+                    'Ragebot', 'ai_peek.prediction', menu.new(
+                        ui.new_slider, 'AA', 'Other', new_key('Prediction ticks', 'ai_peek'), 1, 16, 5, true, 't'
+                    )
+                )
+
+                ai_peek.hitboxes = config_system.push(
+                    'Ragebot', 'ai_peek.hitboxes', menu.new(
+                        ui.new_multiselect, 'AA', 'Other', new_key('Hitboxes', 'ai_peek'), {
+                            'Head',
+                            'Neck',
+                            'Pelvis',
+                            'Stomach',
+                            'Lower chest',
+                            'Chest',
+                            'Upper chest',
+                            'Left thigh',
+                            'Right thigh',
+                            'Left calf',
+                            'Right calf',
+                            'Left foot',
+                            'Right foot',
+                            'Left hand',
+                            'Right hand',
+                            'Left upper arm',
+                            'Left forearm',
+                            'Right upper arm',
+                            'Right forearm'
+                        }
+                    )
+                )
+
+                lock_unselection(ai_peek.hitboxes)
+                ai_peek.scan_all:set(true)
+                ai_peek.hitboxes:set({
+                    'Head',
+                    'Pelvis',
+                    'Left foot',
+                    'Right foot',
+                    'Left forearm',
+                    'Right forearm'
+                })
+
+                ai_peek.debug = config_system.push(
+                    'Ragebot', 'ai_peek.debug', menu.new(
+                        ui.new_checkbox, 'AA', 'Other', new_key('Debug positions', 'ai_peek')
+                    )
+                )
+
+                ai_peek.separator = menu.new(
+                    ui.new_label, 'AA', 'Other', '\n'
+                )
+
+                ragebot.ai_peek = ai_peek
+            end
+
             main.ragebot = ragebot
         end
 
@@ -661,6 +770,16 @@ local resource do
                 )
 
                 miscellaneous.fast_ladder = fast_ladder
+            end
+
+            local air_stop_shift = { } do
+                air_stop_shift.enabled = config_system.push(
+                    'Miscellaneous', 'air_stop_shift.enabled', menu.new(
+                        ui.new_checkbox, 'AA', 'Anti-aimbot angles', new_key('Air stop on Shift', 'air_stop_shift')
+                    )
+                )
+
+                miscellaneous.air_stop_shift = air_stop_shift
             end
 
             local console_filter = { } do
@@ -1023,8 +1142,15 @@ local resource do
                             'On reload',
                             'On hittable',
                             'On dormant peek',
-                            'On freestand'
+                            'On freestand',
+                            'Hotkey'
                         }
+                    )
+                )
+
+                items.trigger_hotkey = config_system.push(
+                    'Builder', hash 'trigger_hotkey', menu.new(
+                        ui.new_hotkey, 'AA', 'Other', new_key('Hotkey', hash 'trigger_hotkey'), true
                     )
                 )
 
@@ -1581,10 +1707,6 @@ local resource do
                     )
                 )
 
-                backtrack_disruptor.separator = menu.new(
-                    ui.new_label, 'AA', 'Anti-aimbot angles', '\n'
-                )
-
                 features.backtrack_disruptor = backtrack_disruptor
             end
 
@@ -2090,6 +2212,18 @@ local resource do
             misc_section.viewmodel_changer = {
                 override    = menu.new(ui.new_checkbox, "AA", "Anti-aimbot angles", new_key("Viewmodel changer",  "we_vm")),
                 scope_hide  = menu.new(ui.new_checkbox, "AA", "Anti-aimbot angles", new_key("Scoped viewmodel",  "we_vm")),
+                hand_move   = menu.new(ui.new_slider,   "AA", "Anti-aimbot angles", new_key("Hand movement",     "we_vm"), 0, 100, 100, true, "%"),
+                storage = {
+                    fov       = menu.new(ui.new_textbox, "AA", "Anti-aimbot angles", new_key("VM fov storage",       "we_vm")),
+                    x         = menu.new(ui.new_textbox, "AA", "Anti-aimbot angles", new_key("VM x storage",         "we_vm")),
+                    y         = menu.new(ui.new_textbox, "AA", "Anti-aimbot angles", new_key("VM y storage",         "we_vm")),
+                    z         = menu.new(ui.new_textbox, "AA", "Anti-aimbot angles", new_key("VM z storage",         "we_vm")),
+                    scope_fov = menu.new(ui.new_textbox, "AA", "Anti-aimbot angles", new_key("VM scope fov storage", "we_vm")),
+                    scope_x   = menu.new(ui.new_textbox, "AA", "Anti-aimbot angles", new_key("VM scope x storage",   "we_vm")),
+                    scope_y   = menu.new(ui.new_textbox, "AA", "Anti-aimbot angles", new_key("VM scope y storage",   "we_vm")),
+                    scope_z   = menu.new(ui.new_textbox, "AA", "Anti-aimbot angles", new_key("VM scope z storage",   "we_vm")),
+                    scope_custom = menu.new(ui.new_textbox, "AA", "Anti-aimbot angles", new_key("VM scope custom storage", "we_vm")),
+                },
             }
             misc_section.custom_scope = {
                 enable      = menu.new(ui.new_checkbox,     "AA", "Anti-aimbot angles", new_key("Custom scope",      "we_cs")),
@@ -2455,6 +2589,11 @@ local resource do
 
                 if defensive.enabled:get() then
                     menu_logic.set(defensive.triggers, true)
+
+                    if defensive.triggers:get('Hotkey') then
+                        menu_logic.set(defensive.trigger_hotkey, true)
+                    end
+
                     menu_logic.set(defensive.trigger_from, true)
                     menu_logic.set(defensive.trigger_to, true)
                     menu_logic.set(defensive.trigger_duration, true)
@@ -2659,6 +2798,25 @@ local resource do
                     end
                 end
 
+                local is_ai_peek = ref.ai_peek.enabled:get() do
+                    menu_logic.set(ref.ai_peek.enabled, true)
+
+                    if is_ai_peek then
+                        menu_logic.set(ref.ai_peek.hotkey, true)
+                        menu_logic.set(ref.ai_peek.min_damage_label, true)
+                        menu_logic.set(ref.ai_peek.min_damage_override, true)
+                        menu_logic.set(ref.ai_peek.scan_all, true)
+                        menu_logic.set(ref.ai_peek.live_scan, true)
+                        menu_logic.set(ref.ai_peek.distance, true)
+                        menu_logic.set(ref.ai_peek.separation, true)
+                        menu_logic.set(ref.ai_peek.count, true)
+                        menu_logic.set(ref.ai_peek.prediction, true)
+                        menu_logic.set(ref.ai_peek.hitboxes, true)
+                        menu_logic.set(ref.ai_peek.debug, true)
+                        menu_logic.set(ref.ai_peek.separator, true)
+                    end
+                end
+
                 local is_auto_whitelist_broken_lc = ref.auto_whitelist_broken_lc.enabled:get() do
                     menu_logic.set(ref.auto_whitelist_broken_lc.enabled, true)
                     menu_logic.set(ref.auto_whitelist_broken_lc.actions, is_auto_whitelist_broken_lc)
@@ -2687,6 +2845,7 @@ local resource do
 
 
                 menu_logic.set(ref.fast_ladder.enabled, true)
+                menu_logic.set(ref.air_stop_shift.enabled, true)
                 menu_logic.set(ref.console_filter.enabled, true)
                 menu_logic.set(ref.sync_ragebot_hotkeys.enabled, true)
                 menu_logic.set(ref.reveal_enemy_team_chat.enabled, true)
@@ -2715,6 +2874,7 @@ local resource do
                 menu_logic.set(render_ref.viewmodel_changer.override, true)
                 if render_ref.viewmodel_changer.override:get() then
                     menu_logic.set(render_ref.viewmodel_changer.scope_hide, true)
+                    menu_logic.set(render_ref.viewmodel_changer.hand_move, true)
                 end
 
                 menu_logic.set(render_ref.custom_scope.enable, true)
@@ -2883,7 +3043,6 @@ local resource do
 
                 local is_backtrack_disruptor = ref.backtrack_disruptor.enabled:get() do
                     menu_logic.set(ref.backtrack_disruptor.enabled, true)
-                    menu_logic.set(ref.backtrack_disruptor.separator, is_backtrack_disruptor)
                 end
 
                 local is_record_disruptor = ref.record_disruptor.enabled:get() do

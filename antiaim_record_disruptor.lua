@@ -16,11 +16,14 @@ function M.new(deps)
     local record_disruptor = {}
 
     local MAX_DISTANCE = 1100
-    local MAX_FOV = 32
+    local MAX_FOV = 26
+    local MIN_LOCAL_SPEED = 35
+    local MIN_THREAT_DAMAGE = 5
+    local MIN_THREAT_SCORE = 0.58
     local FULL_LOCAL_SPEED = 180
     local MIN_LOCAL_SPEED_SCALE = 0.18
-    local PULSE_COOLDOWN_MIN = 2
-    local PULSE_COOLDOWN_MAX = 5
+    local PULSE_COOLDOWN_MIN = 8
+    local PULSE_COOLDOWN_MAX = 16
 
     local state = {
         pulse_left = 0,
@@ -120,21 +123,51 @@ function M.new(deps)
         return math.sqrt(pitch_delta * pitch_delta + yaw_delta * yaw_delta)
     end
 
+    local function get_local_damage_points(me, local_head)
+        local points = {}
+
+        if local_head ~= nil then
+            points[#points + 1] = local_head
+        end
+
+        local hitboxes = { 2, 3, 4, 5, 6 }
+
+        for i = 1, #hitboxes do
+            local x, y, z = entity.hitbox_position(me, hitboxes[i])
+
+            if x ~= nil then
+                points[#points + 1] = vector(x, y, z)
+            end
+        end
+
+        return points
+    end
+
     local function can_threat_damage_local(me, threat, local_head)
         local eye = get_eye_position(threat)
 
         if eye == nil or local_head == nil then
-            return false
+            return false, 0
         end
 
-        local entindex, damage = client.trace_bullet(
-            threat,
-            eye.x, eye.y, eye.z,
-            local_head.x, local_head.y, local_head.z,
-            false
-        )
+        local points = get_local_damage_points(me, local_head)
+        local best_damage = 0
 
-        return entindex == me and damage ~= nil and damage > 1
+        for i = 1, #points do
+            local point = points[i]
+            local entindex, damage = client.trace_bullet(
+                threat,
+                eye.x, eye.y, eye.z,
+                point.x, point.y, point.z,
+                false
+            )
+
+            if entindex == me and damage ~= nil then
+                best_damage = math.max(best_damage, damage)
+            end
+        end
+
+        return best_damage > MIN_THREAT_DAMAGE, best_damage
     end
 
     local function get_best_threat(me)
@@ -142,9 +175,14 @@ function M.new(deps)
         local local_head = get_head_position(me)
         local my_origin = get_origin(me)
         local view_pitch, view_yaw = client.camera_angles()
+        local local_speed = get_speed2d(me)
         local velocity_scale = get_local_velocity_scale(me)
 
         if eye == nil or local_head == nil or my_origin == nil or view_pitch == nil then
+            return nil
+        end
+
+        if local_speed < MIN_LOCAL_SPEED then
             return nil
         end
 
@@ -182,14 +220,20 @@ function M.new(deps)
             local fov_score = 1 - utils.clamp(fov / MAX_FOV, 0, 1)
             local distance_score = 1 - utils.clamp(distance / MAX_DISTANCE, 0, 1)
             local speed_score = utils.clamp(get_speed2d(player) / 260, 0, 1)
-            local score = fov_score * 0.55 + distance_score * 0.20 + speed_score * 0.15
+            local can_damage, damage = can_threat_damage_local(me, player, local_head)
 
-            if get_esp_flag(player, 11) then
-                score = score + 0.18
+            if not can_damage then
+                goto continue
             end
 
-            if get_esp_flag(me, 11) or can_threat_damage_local(me, player, local_head) then
-                score = score + 0.22
+            local damage_score = utils.clamp(damage / 80, 0, 1)
+            local score = fov_score * 0.42
+                + distance_score * 0.16
+                + speed_score * 0.12
+                + damage_score * 0.30
+
+            if get_esp_flag(player, 11) then
+                score = score + 0.08
             end
 
             if score > best_score then
@@ -200,7 +244,7 @@ function M.new(deps)
             ::continue::
         end
 
-        if best_score < 0.48 then
+        if best_score < MIN_THREAT_SCORE then
             return nil
         end
 

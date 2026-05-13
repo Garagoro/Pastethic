@@ -750,6 +750,10 @@ local antiaim = { } do
                 return true
             end
 
+            if has_trigger(items, 'Hotkey') and items.trigger_hotkey ~= nil and items.trigger_hotkey:get() then
+                return true
+            end
+
             local me = entity.get_local_player()
 
             if me == nil then

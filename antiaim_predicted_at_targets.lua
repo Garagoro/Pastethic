@@ -18,6 +18,7 @@ function M.new(deps)
     local records = {}
     local PREDICT_DISTANCE_START = 650
     local PREDICT_DISTANCE_END = 1000
+    local MAX_TARGET_FOV = 28
 
     local function get_origin(player)
         local x, y, z = entity.get_origin(player)
@@ -359,58 +360,6 @@ function M.new(deps)
         return math.sqrt(pitch_delta * pitch_delta + yaw_delta * yaw_delta)
     end
 
-    local function get_best_record(me_origin, eye_position, view_pitch, view_yaw)
-        local best_player = nil
-        local best_record = nil
-        local best_fov = nil
-        local best_distance = nil
-
-        for player in pairs(records) do
-            local record = get_active_record(player)
-
-            if record ~= nil then
-                local origin = get_origin(player)
-
-                if origin ~= nil then
-                    local distance = get_distance2d(me_origin, origin)
-                    local distance_weight = get_distance_weight(distance)
-
-                    if distance_weight > 0 then
-                        local target = record.predicted_origin + vector(0, 0, 52)
-                        local fov = get_crosshair_fov(
-                            eye_position,
-                            target,
-                            view_pitch,
-                            view_yaw
-                        )
-
-                        if best_fov == nil
-                            or fov < best_fov
-                            or (
-                                math.abs(fov - best_fov) < 0.15
-                                and (
-                                    best_distance == nil
-                                    or distance < best_distance
-                                    or (
-                                        distance == best_distance
-                                        and (record.confidence or 0) > (best_record.confidence or 0)
-                                    )
-                                )
-                            )
-                        then
-                            best_fov = fov
-                            best_distance = distance
-                            best_player = player
-                            best_record = record
-                        end
-                    end
-                end
-            end
-        end
-
-        return best_player, best_record
-    end
-
     function predicted_at_targets:update(buffer)
         if not ref.enabled:get() then
             return false
@@ -439,25 +388,49 @@ function M.new(deps)
             return false
         end
 
-        local threat, record = get_best_record(
-            my_origin,
+        local threat = client.current_threat()
+
+        if threat == nil or not entity.is_alive(threat) or entity.is_dormant(threat) then
+            return false
+        end
+
+        local record = get_active_record(threat)
+
+        if record == nil then
+            return false
+        end
+
+        local threat_origin = get_origin(threat)
+
+        if threat_origin == nil then
+            return false
+        end
+
+        local distance = get_distance2d(my_origin, threat_origin)
+        if get_distance_weight(distance) <= 0 then
+            return false
+        end
+
+        local current_target = threat_origin + vector(0, 0, 52)
+        local current_fov = get_crosshair_fov(
             eye_position,
+            current_target,
             camera_pitch,
             camera_yaw
         )
 
-        if threat == nil or record == nil then
+        if current_fov > MAX_TARGET_FOV then
             return false
         end
 
+        local current_yaw = get_yaw(my_origin, threat_origin)
         local predicted_yaw = get_yaw(my_origin, record.predicted_origin)
         local correction = utils.normalize(
-            predicted_yaw - camera_yaw,
+            predicted_yaw - current_yaw,
             -180,
             180
         )
 
-        buffer.yaw_base = 'Local view'
         buffer.yaw_offset = (buffer.yaw_offset or 0) + correction
 
         return true

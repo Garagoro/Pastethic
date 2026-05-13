@@ -20,10 +20,6 @@ function M.start(deps)
     local RELEASE_BURST_TICKS = 12
     local RELEASE_BURST_PULSES = 4
     local LIGHT_SCAN_INTERVAL = 4
-    local WALL_PROJECTION_TICKS = 8
-    local WALL_SPEED_MIN = 45
-    local WALL_TRIGGER_COOLDOWN = 18
-    local WALL_SCAN_INTERVAL = 3
 
     local last_choked = 0
     local last_defensive_active = false
@@ -37,10 +33,7 @@ function M.start(deps)
     local next_burst_pulse = 0
     local next_light_pulse = 0
     local next_light_scan = 0
-    local next_wall_trigger = 0
-    local next_wall_scan = 0
     local cached_hittable = false
-    local cached_going_behind_wall = false
     local defensive_indicator = false
 
     local function reset()
@@ -55,10 +48,7 @@ function M.start(deps)
         next_burst_pulse = 0
         next_light_pulse = 0
         next_light_scan = 0
-        next_wall_trigger = 0
-        next_wall_scan = 0
         cached_hittable = false
-        cached_going_behind_wall = false
         defensive_indicator = false
     end
 
@@ -239,44 +229,6 @@ function M.start(deps)
         return are_points_hittable(me, get_local_points(me))
     end
 
-    local function is_going_behind_wall(me)
-        local tick = globals.tickcount()
-
-        if tick < next_wall_scan then
-            return cached_going_behind_wall
-        end
-
-        next_wall_scan = tick + WALL_SCAN_INTERVAL
-        cached_going_behind_wall = false
-
-        local origin = get_origin(me)
-        if origin == nil then
-            return false
-        end
-
-        local vx, vy, vz = get_velocity(me)
-        local speed = math.sqrt(vx * vx + vy * vy)
-
-        if speed < WALL_SPEED_MIN then
-            return false
-        end
-
-        local current_points = get_local_points(me)
-        if not are_points_hittable(me, current_points) then
-            return false
-        end
-
-        local project_time = globals.tickinterval() * WALL_PROJECTION_TICKS
-        local future_points = offset_points(
-            current_points,
-            vx * project_time,
-            vy * project_time,
-            vz * project_time
-        )
-
-        cached_going_behind_wall = not are_points_hittable(me, future_points)
-        return cached_going_behind_wall
-    end
     local function update_hittable_cache(me)
         local tick = globals.tickcount()
 
@@ -480,18 +432,10 @@ function M.start(deps)
         end
 
         defensive_indicator = is_defensive_active()
-        update_release_triggers(cmd, me)
-
-        if is_going_behind_wall(me) and cmd.command_number >= next_wall_trigger then
-            next_wall_trigger = cmd.command_number + WALL_TRIGGER_COOLDOWN
-            start_release_burst(cmd)
-        end
 
         if apply_release_burst(cmd, me) then
             return
         end
-
-        apply_light_pulse(cmd, me)
     end
 
     local function on_paint_ui()

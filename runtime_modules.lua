@@ -13,7 +13,9 @@ function M.start(ctx)
     local pasthetic_rage_hitchance = require_pasthetic_module 'pasthetic/rage_hitchance'
     local pasthetic_rage_auto_whitelist_broken_lc = require_pasthetic_module 'pasthetic/rage_auto_whitelist_broken_lc'
     local pasthetic_rage_peek_assist = require_pasthetic_module 'pasthetic/rage_peek_assist'
+    local pasthetic_rage_ai_peek = require_pasthetic_module 'pasthetic/rage_ai_peek'
     local pasthetic_misc_fast_ladder = require_pasthetic_module 'pasthetic/misc_fast_ladder'
+    local pasthetic_misc_air_stop_shift = require_pasthetic_module 'pasthetic/misc_air_stop_shift'
     local pasthetic_misc_console_filter = require_pasthetic_module 'pasthetic/misc_console_filter'
     local pasthetic_misc_sync_ragebot_hotkeys = require_pasthetic_module 'pasthetic/misc_sync_ragebot_hotkeys'
     local pasthetic_misc_reveal_enemy_team_chat = require_pasthetic_module 'pasthetic/misc_reveal_enemy_team_chat'
@@ -211,6 +213,19 @@ function M.start(ctx)
                 utils = utils
             })
             end)
+
+            diagnostics:start('rage_ai_peek', function()
+                return pasthetic_rage_ai_peek.start({
+                resource = resource,
+                ui = ui,
+                entity = entity,
+                client = client,
+                globals = globals,
+                vector = vector,
+                renderer = renderer,
+                utils = utils
+            })
+            end)
         end
 
         diagnostics:start('anim_breaker', function()
@@ -379,6 +394,17 @@ function M.start(ctx)
     end)
     diagnostics:health('antiaim_presets', pasthetic_antiaim_presets)
     diagnostics:health('antiaim', pasthetic_antiaim)
+
+    diagnostics:start('misc_air_stop_shift', function()
+        return pasthetic_misc_air_stop_shift.start({
+            resource = resource,
+            entity = entity,
+            client = client,
+            utils = utils,
+            bit = bit
+        })
+    end)
+
     -- ============================================
     -- CRASH FIX (always enabled)
     -- ============================================

@@ -103,15 +103,32 @@ local we_vars = {
         old_x   = client_get_cvar("viewmodel_offset_x"),
         old_y   = client_get_cvar("viewmodel_offset_y"),
         old_z   = client_get_cvar("viewmodel_offset_z"),
+        old_bob_lower = client_get_cvar("cl_bob_lower_amt"),
+        old_bob_lat = client_get_cvar("cl_bobamt_lat"),
+        old_bob_vert = client_get_cvar("cl_bobamt_vert"),
+        old_bob_up = client_get_cvar("cl_bobup"),
+        old_use_new_headbob = client_get_cvar("cl_use_new_headbob"),
+        old_headbob_land_dip = client_get_cvar("cl_headbob_land_dip_amt"),
+        old_wpn_sway_scale = client_get_cvar("cl_wpn_sway_scale"),
+        old_wpn_sway_interp = client_get_cvar("cl_wpn_sway_interp"),
+        old_viewmodel_recoil = client_get_cvar("viewmodel_recoil"),
+        old_gun_lower_angle = client_get_cvar("cl_gunlowerangle"),
+        old_shift_left = client_get_cvar("cl_viewmodel_shift_left_amt"),
+        old_shift_right = client_get_cvar("cl_viewmodel_shift_right_amt"),
         fov = 54,
         x = 25,
         y = -20,
         z = -20,
-        scope_x = -150,
+        scope_fov = nil,
+        scope_x = nil,
+        scope_y = nil,
+        scope_z = nil,
+        scope_customized = false,
         current_fov = nil,
         current_x = nil,
         current_y = nil,
         current_z = nil,
+        active_profile = nil,
     },
     viewmodel_editor = {
         w = 145,
@@ -139,8 +156,10 @@ local we_vars = {
         get_attachment = nil,
         get_muzzle_attachment = nil,
         block_input_until = 0,
+        suspend_until = 0,
+        syncing_storage = false,
+        storage_load_token = 0,
     },
-    scope_hide = { x_current = nil },
     effects = {
         bloom_default = nil,
         exposure_min_default = nil,
@@ -553,8 +572,282 @@ local function vm_editor_set_slider(item, value, min_value, max_value)
     item:set(vm_editor_clamp(vm_editor_round(value), min_value, max_value))
 end
 
-local function vm_editor_set_value(key, value, min_value, max_value)
+local vm_editor_apply_values, vm_editor_is_scoped
+
+local function vm_editor_sync_storage()
+    local storage = rm.viewmodel_changer.storage
+    local viewmodel = we_vars.viewmodel
+    local editor = we_vars.viewmodel_editor
+
+    if storage == nil or editor.syncing_storage then
+        return
+    end
+
+    local function write(item, value)
+        if item ~= nil then
+            item:set(value ~= nil and tostring(vm_editor_round(value)) or "")
+        end
+    end
+
+    editor.syncing_storage = true
+    write(storage.fov, viewmodel.fov)
+    write(storage.x, viewmodel.x)
+    write(storage.y, viewmodel.y)
+    write(storage.z, viewmodel.z)
+    if viewmodel.scope_customized then
+        write(storage.scope_fov, viewmodel.scope_fov)
+        write(storage.scope_x, viewmodel.scope_x)
+        write(storage.scope_y, viewmodel.scope_y)
+        write(storage.scope_z, viewmodel.scope_z)
+        write(storage.scope_custom, 1)
+    else
+        write(storage.scope_fov, nil)
+        write(storage.scope_x, nil)
+        write(storage.scope_y, nil)
+        write(storage.scope_z, nil)
+        write(storage.scope_custom, nil)
+    end
+    editor.syncing_storage = false
+end
+
+local function vm_editor_load_storage()
+    local storage = rm.viewmodel_changer.storage
+    local viewmodel = we_vars.viewmodel
+    local editor = we_vars.viewmodel_editor
+
+    if storage == nil or editor.syncing_storage then
+        return
+    end
+
+    local loaded = false
+    local function read(name, min_value, max_value)
+        local item = storage[name]
+        local value = item ~= nil and tonumber(item:get()) or nil
+
+        if value ~= nil then
+            viewmodel[name] = vm_editor_clamp(value, min_value, max_value)
+            loaded = true
+        end
+    end
+
+    read("fov", VM_EDITOR_FOV_MIN, VM_EDITOR_FOV_MAX)
+    read("x", VM_EDITOR_X_MIN, VM_EDITOR_X_MAX)
+    read("y", VM_EDITOR_Y_MIN, VM_EDITOR_Y_MAX)
+    read("z", VM_EDITOR_Z_MIN, VM_EDITOR_Z_MAX)
+    local has_legacy_scope = (
+        (storage.scope_fov ~= nil and tonumber(storage.scope_fov:get()) ~= nil)
+        or (storage.scope_x ~= nil and tonumber(storage.scope_x:get()) ~= nil)
+        or (storage.scope_y ~= nil and tonumber(storage.scope_y:get()) ~= nil)
+        or (storage.scope_z ~= nil and tonumber(storage.scope_z:get()) ~= nil)
+    )
+    viewmodel.scope_customized = (storage.scope_custom ~= nil and storage.scope_custom:get() == "1")
+        or has_legacy_scope
+    if viewmodel.scope_customized then
+        read("scope_fov", VM_EDITOR_FOV_MIN, VM_EDITOR_FOV_MAX)
+        read("scope_x", VM_EDITOR_X_MIN, VM_EDITOR_X_MAX)
+        read("scope_y", VM_EDITOR_Y_MIN, VM_EDITOR_Y_MAX)
+        read("scope_z", VM_EDITOR_Z_MIN, VM_EDITOR_Z_MAX)
+    else
+        viewmodel.scope_fov = nil
+        viewmodel.scope_x = nil
+        viewmodel.scope_y = nil
+        viewmodel.scope_z = nil
+    end
+
+    if not loaded then
+        vm_editor_sync_storage()
+        return
+    end
+
+    viewmodel.current_fov = nil
+    viewmodel.current_x = nil
+    viewmodel.current_y = nil
+    viewmodel.current_z = nil
+    viewmodel.active_profile = nil
+
+    if rm.viewmodel_changer.override:get() then
+        vm_editor_apply_values(vm_editor_is_scoped(), true)
+    end
+end
+
+local function vm_editor_schedule_load_storage()
+    local editor = we_vars.viewmodel_editor
+
+    if editor.syncing_storage then
+        return
+    end
+
+    editor.storage_load_token = (editor.storage_load_token or 0) + 1
+    local token = editor.storage_load_token
+
+    client_delay_call(0, function()
+        if token ~= we_vars.viewmodel_editor.storage_load_token then
+            return
+        end
+
+        vm_editor_load_storage()
+    end)
+end
+
+local function vm_editor_set_value(key, value, min_value, max_value, mark_scope_customized)
+    if mark_scope_customized then
+        we_vars.viewmodel.scope_customized = true
+    end
+
     we_vars.viewmodel[key] = vm_editor_clamp(value, min_value, max_value)
+    vm_editor_sync_storage()
+end
+
+local function vm_editor_ensure_scope_values()
+    local viewmodel = we_vars.viewmodel
+
+    if not viewmodel.scope_customized then
+        viewmodel.scope_fov = vm_editor_clamp(viewmodel.fov or 54, VM_EDITOR_FOV_MIN, VM_EDITOR_FOV_MAX)
+        viewmodel.scope_x = vm_editor_clamp((viewmodel.x or 0) + 20, VM_EDITOR_X_MIN, VM_EDITOR_X_MAX)
+        viewmodel.scope_y = vm_editor_clamp(viewmodel.y or 0, VM_EDITOR_Y_MIN, VM_EDITOR_Y_MAX)
+        viewmodel.scope_z = vm_editor_clamp((viewmodel.z or 0) + 20, VM_EDITOR_Z_MIN, VM_EDITOR_Z_MAX)
+        return
+    end
+
+    local changed = false
+
+    if viewmodel.scope_x == nil then
+        viewmodel.scope_x = vm_editor_clamp((viewmodel.x or 0) + 20, VM_EDITOR_X_MIN, VM_EDITOR_X_MAX)
+        changed = true
+    end
+
+    if viewmodel.scope_y == nil then
+        viewmodel.scope_y = vm_editor_clamp(
+            viewmodel.y or 0,
+            VM_EDITOR_Y_MIN,
+            VM_EDITOR_Y_MAX
+        )
+        changed = true
+    end
+
+    if viewmodel.scope_z == nil then
+        viewmodel.scope_z = vm_editor_clamp(
+            (viewmodel.z or 0) + 20,
+            VM_EDITOR_Z_MIN,
+            VM_EDITOR_Z_MAX
+        )
+        changed = true
+    end
+
+    if viewmodel.scope_fov == nil then
+        viewmodel.scope_fov = vm_editor_clamp(
+            viewmodel.fov or 54,
+            VM_EDITOR_FOV_MIN,
+            VM_EDITOR_FOV_MAX
+        )
+        changed = true
+    end
+
+    if changed then
+        vm_editor_sync_storage()
+    end
+end
+
+local function vm_editor_use_scope_values(scoped)
+    return scoped and rm.viewmodel_changer.scope_hide:get()
+end
+
+local function vm_editor_get_values(scoped)
+    local viewmodel = we_vars.viewmodel
+
+    if vm_editor_use_scope_values(scoped) then
+        vm_editor_ensure_scope_values()
+
+        return {
+            fov = viewmodel.scope_fov,
+            x = viewmodel.scope_x,
+            y = viewmodel.scope_y,
+            z = viewmodel.scope_z,
+            label = 'S'
+        }
+    end
+
+    return {
+        fov = viewmodel.fov,
+        x = viewmodel.x,
+        y = viewmodel.y,
+        z = viewmodel.z,
+        label = ''
+    }
+end
+
+local function vm_editor_get_profile(scoped)
+    return vm_editor_use_scope_values(scoped) and "scope" or "normal"
+end
+
+local function vm_editor_set_cvar(name, value)
+    local cv = cvar and cvar[name]
+    if cv ~= nil then
+        if cv.set_raw_float ~= nil then
+            cv:set_raw_float(value)
+            return
+        end
+
+        if cv.set_float ~= nil then
+            cv:set_float(value)
+            return
+        end
+    end
+
+    client_set_cvar(name, value)
+end
+
+local function vm_editor_restore_cvar(name, value, fallback)
+    vm_editor_set_cvar(name, tonumber(value) or fallback)
+end
+
+local function vm_editor_apply_hand_movement()
+    local viewmodel = we_vars.viewmodel
+    local amount = rm.viewmodel_changer.override:get() and rm.viewmodel_changer.hand_move:get() or 100
+
+    vm_editor_restore_cvar("cl_bob_lower_amt", viewmodel.old_bob_lower, 21)
+    vm_editor_restore_cvar("cl_bobamt_lat", viewmodel.old_bob_lat, 0.4)
+    vm_editor_restore_cvar("cl_bobamt_vert", viewmodel.old_bob_vert, 0.25)
+    vm_editor_restore_cvar("cl_bobup", viewmodel.old_bob_up, 0.5)
+    vm_editor_restore_cvar("cl_use_new_headbob", viewmodel.old_use_new_headbob, 1)
+    vm_editor_restore_cvar("cl_headbob_land_dip_amt", viewmodel.old_headbob_land_dip, 4)
+    vm_editor_restore_cvar("cl_wpn_sway_scale", viewmodel.old_wpn_sway_scale, 1.6)
+    vm_editor_restore_cvar("cl_wpn_sway_interp", viewmodel.old_wpn_sway_interp, 0.1)
+    vm_editor_restore_cvar("viewmodel_recoil", viewmodel.old_viewmodel_recoil, 1)
+    vm_editor_restore_cvar("cl_gunlowerangle", viewmodel.old_gun_lower_angle, 2)
+    vm_editor_restore_cvar("cl_viewmodel_shift_left_amt", viewmodel.old_shift_left, 1.5)
+    vm_editor_restore_cvar("cl_viewmodel_shift_right_amt", viewmodel.old_shift_right, 0.75)
+
+    if not rm.viewmodel_changer.override:get() then
+        return
+    end
+
+    vm_editor_set_cvar("cl_headbob_land_dip_amt", 0)
+
+    if amount >= 100 then
+        return
+    end
+
+    if amount < 100 then
+        vm_editor_set_cvar("cl_bob_lower_amt", 0)
+    end
+
+    if amount < 65 then
+        vm_editor_set_cvar("cl_bobamt_lat", 0)
+        vm_editor_set_cvar("cl_bobamt_vert", 0)
+    end
+
+    if amount < 35 then
+        vm_editor_set_cvar("cl_wpn_sway_scale", 0)
+        vm_editor_set_cvar("viewmodel_recoil", 0)
+        vm_editor_set_cvar("cl_gunlowerangle", 0)
+        vm_editor_set_cvar("cl_viewmodel_shift_left_amt", 0)
+        vm_editor_set_cvar("cl_viewmodel_shift_right_amt", 0)
+    end
+
+    if amount <= 0 then
+        vm_editor_set_cvar("cl_wpn_sway_interp", 0)
+    end
 end
 
 local function vm_editor_is_hovered(mx, my)
@@ -608,6 +901,14 @@ end
 
 local function vm_editor_get_anchor()
     local editor = we_vars.viewmodel_editor
+    if globals_tickcount() <= (editor.suspend_until or 0) then
+        return nil, nil
+    end
+
+    if globals_mapname() == nil then
+        return nil, nil
+    end
+
     if not vm_editor_init_attachment() then return nil, nil end
 
     local lp = entity_get_local_player()
@@ -743,7 +1044,20 @@ local function vm_editor_should_block_input()
         and globals_tickcount() <= editor.block_input_until
 end
 
-local function vm_editor_is_scoped()
+local function vm_editor_suspend(ticks)
+    local editor = we_vars.viewmodel_editor
+    editor.suspend_until = globals_tickcount() + (ticks or 64)
+    editor.dragging = false
+    editor.last_x = nil
+    editor.last_y = nil
+    editor.attachment_ready = nil
+    editor.entity_list = nil
+    editor.get_client_entity = nil
+    editor.get_attachment = nil
+    editor.get_muzzle_attachment = nil
+end
+
+function vm_editor_is_scoped()
     local lp = entity_get_local_player()
     if not lp then return false end
 
@@ -768,18 +1082,14 @@ local function vm_editor_is_thirdperson()
     return ok and enabled == true and active == true
 end
 
-local function vm_editor_apply_values(scoped, immediate)
+function vm_editor_apply_values(scoped, immediate)
     local viewmodel = we_vars.viewmodel
-    local target_fov = vm_editor_clamp(viewmodel.fov, VM_EDITOR_FOV_MIN, VM_EDITOR_FOV_MAX)
-    local target_y = vm_editor_clamp(viewmodel.y, VM_EDITOR_Y_MIN, VM_EDITOR_Y_MAX) / 10
-    local target_z = vm_editor_clamp(viewmodel.z, VM_EDITOR_Z_MIN, VM_EDITOR_Z_MAX) / 10
-    local target_x
-
-    if scoped and rm.viewmodel_changer.scope_hide:get() then
-        target_x = vm_editor_clamp(viewmodel.scope_x, VM_EDITOR_X_MIN, VM_EDITOR_X_MAX) / 10
-    else
-        target_x = vm_editor_clamp(viewmodel.x, VM_EDITOR_X_MIN, VM_EDITOR_X_MAX) / 10
-    end
+    local values = vm_editor_get_values(scoped)
+    local profile = vm_editor_get_profile(scoped)
+    local target_fov = vm_editor_clamp(values.fov, VM_EDITOR_FOV_MIN, VM_EDITOR_FOV_MAX)
+    local target_x = vm_editor_clamp(values.x, VM_EDITOR_X_MIN, VM_EDITOR_X_MAX) / 10
+    local target_y = vm_editor_clamp(values.y, VM_EDITOR_Y_MIN, VM_EDITOR_Y_MAX) / 10
+    local target_z = vm_editor_clamp(values.z, VM_EDITOR_Z_MIN, VM_EDITOR_Z_MAX) / 10
 
     if viewmodel.current_fov == nil then
         viewmodel.current_fov = target_fov
@@ -787,6 +1097,7 @@ local function vm_editor_apply_values(scoped, immediate)
         viewmodel.current_y = target_y
         viewmodel.current_z = target_z
     end
+    viewmodel.active_profile = profile
 
     local factor = immediate and 1 or math_min(1, 12 * globals_frametime())
 
@@ -804,34 +1115,37 @@ local function vm_editor_apply_values(scoped, immediate)
     client_set_cvar("viewmodel_offset_x", viewmodel.current_x)
     client_set_cvar("viewmodel_offset_y", viewmodel.current_y)
     client_set_cvar("viewmodel_offset_z", viewmodel.current_z)
-
-    if rm.viewmodel_changer.scope_hide:get() then
-        we_vars.scope_hide.x_current = viewmodel.current_x
-    end
 end
 
 local function vm_editor_apply_wheel_delta(wheel_delta)
     if wheel_delta == 0 then return end
 
     local scoped = vm_editor_is_scoped()
+    local use_scope = vm_editor_use_scope_values(scoped)
     local shift = client_key_state(0x10) == true
     local ctrl = client_key_state(0x11) == true
+
+    if use_scope then
+        vm_editor_ensure_scope_values()
+    end
 
     if shift then
         local fov_step = ctrl and 1 or 2
         vm_editor_set_value(
-            "fov",
-            we_vars.viewmodel.fov + wheel_delta * fov_step,
+            use_scope and "scope_fov" or "fov",
+            (use_scope and we_vars.viewmodel.scope_fov or we_vars.viewmodel.fov) + wheel_delta * fov_step,
             VM_EDITOR_FOV_MIN,
-            VM_EDITOR_FOV_MAX
+            VM_EDITOR_FOV_MAX,
+            use_scope
         )
     else
         local y_step = ctrl and 2 or 8
         vm_editor_set_value(
-            "y",
-            we_vars.viewmodel.y + wheel_delta * y_step,
+            use_scope and "scope_y" or "y",
+            (use_scope and we_vars.viewmodel.scope_y or we_vars.viewmodel.y) + wheel_delta * y_step,
             VM_EDITOR_Y_MIN,
-            VM_EDITOR_Y_MAX
+            VM_EDITOR_Y_MAX,
+            use_scope
         )
     end
 
@@ -840,6 +1154,7 @@ end
 
 local function vm_editor_apply_screen_error(error_x, error_y, scoped)
     local ctrl = client_key_state(0x11) == true
+    local use_scope = vm_editor_use_scope_values(scoped)
     local gain = ctrl and 0.018 or 0.055
     local step_x = error_x * gain
     local step_z = -error_y * gain
@@ -853,15 +1168,21 @@ local function vm_editor_apply_screen_error(error_x, error_y, scoped)
     end
 
     if step_x ~= 0 then
-        if scoped and rm.viewmodel_changer.scope_hide:get() then
-            vm_editor_set_value("scope_x", we_vars.viewmodel.scope_x + step_x, VM_EDITOR_X_MIN, VM_EDITOR_X_MAX)
+        if use_scope then
+            vm_editor_ensure_scope_values()
+            vm_editor_set_value("scope_x", we_vars.viewmodel.scope_x + step_x, VM_EDITOR_X_MIN, VM_EDITOR_X_MAX, true)
         else
             vm_editor_set_value("x", we_vars.viewmodel.x + step_x, VM_EDITOR_X_MIN, VM_EDITOR_X_MAX)
         end
     end
 
     if step_z ~= 0 then
-        vm_editor_set_value("z", we_vars.viewmodel.z + step_z, VM_EDITOR_Z_MIN, VM_EDITOR_Z_MAX)
+        if use_scope then
+            vm_editor_ensure_scope_values()
+            vm_editor_set_value("scope_z", we_vars.viewmodel.scope_z + step_z, VM_EDITOR_Z_MIN, VM_EDITOR_Z_MAX, true)
+        else
+            vm_editor_set_value("z", we_vars.viewmodel.z + step_z, VM_EDITOR_Z_MIN, VM_EDITOR_Z_MAX)
+        end
     end
 end
 
@@ -946,11 +1267,12 @@ we_cb.viewmodel_editor = function()
     renderer_text(x + 6, y + 22, 190, 190, 190, 225, '', nil, 'drag: X/Z')
     renderer_text(x + 6, y + 37, 190, 190, 190, 225, '', nil, 'wheel: Y')
 
-    local scoped_x = scoped and rm.viewmodel_changer.scope_hide:get()
-    local x_value = scoped_x and we_vars.viewmodel.scope_x or we_vars.viewmodel.x
-    local x_label = scoped_x and 'SX %.1f' or 'X %.1f'
-    renderer_text(x + 76, y + 22, 215, 215, 215, 230, '', nil, string_format(x_label, x_value / 10))
-    renderer_text(x + 76, y + 37, 215, 215, 215, 230, '', nil, string_format('Z %.1f', we_vars.viewmodel.z / 10))
+    local values = vm_editor_get_values(scoped)
+    local scoped_values = values.label == 'S'
+    local x_label = scoped_values and 'SX %.1f' or 'X %.1f'
+    local z_label = scoped_values and 'SZ %.1f' or 'Z %.1f'
+    renderer_text(x + 76, y + 22, 215, 215, 215, 230, '', nil, string_format(x_label, values.x / 10))
+    renderer_text(x + 76, y + 37, 215, 215, 215, 230, '', nil, string_format(z_label, values.z / 10))
 end
 
 we_cb.viewmodel_in_scope = function()
@@ -963,20 +1285,21 @@ we_cb.viewmodel_changer = function()
         we_vars.viewmodel.current_x = nil
         we_vars.viewmodel.current_y = nil
         we_vars.viewmodel.current_z = nil
-        we_vars.scope_hide.x_current = nil
+        we_vars.viewmodel.active_profile = nil
         client_set_cvar("viewmodel_fov",      we_vars.viewmodel.old_fov)
         client_set_cvar("viewmodel_offset_x", we_vars.viewmodel.old_x)
         client_set_cvar("viewmodel_offset_y", we_vars.viewmodel.old_y)
         client_set_cvar("viewmodel_offset_z", we_vars.viewmodel.old_z)
+        vm_editor_apply_hand_movement()
         return
     end
 
+    vm_editor_apply_hand_movement()
     vm_editor_apply_values(vm_editor_is_scoped())
 end
 
 we_cb.scope_hide_update = function()
     if not rm.viewmodel_changer.override:get() then
-        we_vars.scope_hide.x_current = nil
         return
     end
 
@@ -1180,6 +1503,19 @@ local function we_setup()
     rm.aspect_ratio.value:set_callback(we_cb.aspect_ratio)
     rm.viewmodel_in_scope:set_callback(we_cb.viewmodel_in_scope)
     rm.viewmodel_changer.override:set_callback(we_cb.viewmodel_changer)
+    rm.viewmodel_changer.scope_hide:set_callback(we_cb.viewmodel_changer)
+    rm.viewmodel_changer.hand_move:set_callback(vm_editor_apply_hand_movement)
+    if rm.viewmodel_changer.storage ~= nil then
+        rm.viewmodel_changer.storage.fov:set_callback(vm_editor_schedule_load_storage)
+        rm.viewmodel_changer.storage.x:set_callback(vm_editor_schedule_load_storage)
+        rm.viewmodel_changer.storage.y:set_callback(vm_editor_schedule_load_storage)
+        rm.viewmodel_changer.storage.z:set_callback(vm_editor_schedule_load_storage)
+        rm.viewmodel_changer.storage.scope_fov:set_callback(vm_editor_schedule_load_storage)
+        rm.viewmodel_changer.storage.scope_x:set_callback(vm_editor_schedule_load_storage)
+        rm.viewmodel_changer.storage.scope_y:set_callback(vm_editor_schedule_load_storage)
+        rm.viewmodel_changer.storage.scope_z:set_callback(vm_editor_schedule_load_storage)
+        rm.viewmodel_changer.storage.scope_custom:set_callback(vm_editor_schedule_load_storage)
+    end
     rm.remove_sleeves:set_callback(we_cb.remove_sleeves)
 
     rm.custom_scope.enable:set_callback(function()
@@ -1195,6 +1531,7 @@ local function we_setup()
     end)
 
     -- apply settings that may have been loaded before World Enhancer callbacks existed
+    vm_editor_load_storage()
     we_apply_current_settings()
 end
 
@@ -1267,6 +1604,7 @@ end)
 client.set_event_callback("player_disconnect", function(event)
     if client_userid_to_entindex(event.userid) == entity_get_local_player() then
         we_utils.release_precipitation()
+        vm_editor_suspend(128)
         we_vars.weather.created = false
         we_vars.weather.precipitation_entity_idx = nil
         we_vars.weather.precipitation_class = nil
@@ -1276,6 +1614,7 @@ client.set_event_callback("player_disconnect", function(event)
 end)
 
 client.set_event_callback("level_init", function()
+    vm_editor_suspend(32)
     we_cb.fog_override()
     we_cb.sunset_override()
     we_utils.release_precipitation()
@@ -1297,6 +1636,7 @@ client.set_event_callback("round_prestart", function()
 end)
 
 client.set_event_callback("game_newmap", function()
+    vm_editor_suspend(64)
     if globals_mapname() == nil then
         we_vars.effects.bloom_default        = nil
         we_vars.effects.exposure_min_default = nil
@@ -1353,6 +1693,18 @@ client.set_event_callback("shutdown", function()
     client_set_cvar("viewmodel_offset_x", we_vars.viewmodel.old_x)
     client_set_cvar("viewmodel_offset_y", we_vars.viewmodel.old_y)
     client_set_cvar("viewmodel_offset_z", we_vars.viewmodel.old_z)
+    vm_editor_restore_cvar("cl_bob_lower_amt", we_vars.viewmodel.old_bob_lower, 21)
+    vm_editor_restore_cvar("cl_bobamt_lat", we_vars.viewmodel.old_bob_lat, 0.4)
+    vm_editor_restore_cvar("cl_bobamt_vert", we_vars.viewmodel.old_bob_vert, 0.25)
+    vm_editor_restore_cvar("cl_bobup", we_vars.viewmodel.old_bob_up, 0.5)
+    vm_editor_restore_cvar("cl_use_new_headbob", we_vars.viewmodel.old_use_new_headbob, 1)
+    vm_editor_restore_cvar("cl_headbob_land_dip_amt", we_vars.viewmodel.old_headbob_land_dip, 4)
+    vm_editor_restore_cvar("cl_wpn_sway_scale", we_vars.viewmodel.old_wpn_sway_scale, 1.6)
+    vm_editor_restore_cvar("cl_wpn_sway_interp", we_vars.viewmodel.old_wpn_sway_interp, 0.1)
+    vm_editor_restore_cvar("viewmodel_recoil", we_vars.viewmodel.old_viewmodel_recoil, 1)
+    vm_editor_restore_cvar("cl_gunlowerangle", we_vars.viewmodel.old_gun_lower_angle, 2)
+    vm_editor_restore_cvar("cl_viewmodel_shift_left_amt", we_vars.viewmodel.old_shift_left, 1.5)
+    vm_editor_restore_cvar("cl_viewmodel_shift_right_amt", we_vars.viewmodel.old_shift_right, 0.75)
     client_set_cvar("con_filter_enable", 0)
     client_set_cvar("con_filter_text",   "")
     we_utils.restore_sleeves()
