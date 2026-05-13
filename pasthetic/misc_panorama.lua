@@ -12,7 +12,7 @@ local OPTION_MODEL = 'Remove model in mainmenu'
 
 local LOGO_OUTDATED_URL = 'https://raw.githubusercontent.com/Garagoro/Pasthetic/refs/heads/main/logo%202.png'
 local LOGO_DEFAULT_URL = 'https://raw.githubusercontent.com/Garagoro/Pasthetic/refs/heads/main/logo%203.png'
-local BACKGROUND_URL = 'https://raw.githubusercontent.com/Garagoro/Pasthetic/refs/heads/main/1.jpg'
+local BACKGROUND_URL = 'https://raw.githubusercontent.com/Garagoro/Pasthetic/refs/heads/main/pasthetic/1.jpg'
 
 local function array_contains(array, value)
     if type(array) ~= 'table' then

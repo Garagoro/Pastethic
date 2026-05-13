@@ -1,0 +1,748 @@
+-- Pasthetic entrypoint: fallback module loader + app wiring.
+-- Feature/runtime code lives in pasthetic\*.lua modules.
+local PASTHETIC_GIT_URL = 'https://github.com/Garagoro/Pasthetic'
+
+local function log_loader_reinstall_hint()
+    if client ~= nil and client.color_log ~= nil then
+        client.color_log(250, 50, 75, '[Pasthetic] \0')
+        client.color_log(255, 255, 255, 'Redownload the loader from GitHub: ' .. PASTHETIC_GIT_URL)
+    end
+end
+
+local function require_pasthetic_module(name)
+    if package ~= nil and package.loaded ~= nil then
+        package.loaded[name] = nil
+    end
+
+    local ok, result = pcall(require, name)
+
+    if ok then
+        return result
+    end
+
+    if readfile == nil or loadstring == nil then
+        log_loader_reinstall_hint()
+        error(result)
+    end
+
+    local path = name:gsub('/', '\\') .. '.lua'
+    local source = readfile(path)
+
+    if source == nil then
+        local nested_path = 'pasthetic\\' .. path
+        source = readfile(nested_path)
+
+        if source ~= nil then
+            path = nested_path
+        end
+    end
+
+    if source == nil then
+        log_loader_reinstall_hint()
+        error(result)
+    end
+
+    local chunk, load_error = loadstring(source, '@' .. path)
+
+    if chunk == nil then
+        log_loader_reinstall_hint()
+        error(load_error)
+    end
+
+    ok, result = pcall(chunk)
+
+    if not ok then
+        log_loader_reinstall_hint()
+        error(result)
+    end
+
+    package.loaded[name] = result
+
+    return result
+end
+
+local ffi = require 'ffi'
+local vector = require 'vector'
+local base64 = require 'gamesense/base64'
+local clipboard = require 'gamesense/clipboard'
+local chat = require 'gamesense/chat'
+local localize = require 'gamesense/localize'
+local c_entity = require 'gamesense/entity'
+local csgo_weapons = require 'gamesense/csgo_weapons'
+
+-- ====================================================================
+-- Update manager (inlined — handles bootstrap install and auto-update)
+-- ====================================================================
+
+local MANIFEST_URLS = {
+    'https://raw.githubusercontent.com/Garagoro/Pasthetic/refs/heads/main/manifest.json',
+    'https://cdn.jsdelivr.net/gh/Garagoro/Pasthetic@main/manifest.json',
+}
+local BASE_URLS = {
+    'https://raw.githubusercontent.com/Garagoro/Pasthetic/refs/heads/main/',
+    'https://cdn.jsdelivr.net/gh/Garagoro/Pasthetic@main/',
+}
+local MANIFEST_PATH = 'pasthetic\\manifest.json'
+
+local _create_dir
+do
+    pcall(ffi.cdef, 'int __stdcall CreateDirectoryA(const char*, void*);')
+    local ok, k32 = pcall(ffi.load, 'kernel32')
+    if ok and k32 ~= nil then
+        _create_dir = function(path) pcall(k32.CreateDirectoryA, path, nil) end
+    end
+end
+local function create_dir(path)
+    if _create_dir ~= nil and type(path) == 'string' and path ~= '' then _create_dir(path) end
+end
+
+local function create_parent_dirs(path)
+    if type(path) ~= 'string' then return end
+
+    path = path:gsub('\\', '/')
+
+    local current = ''
+
+    for part in path:gmatch('([^/]+)/') do
+        current = current == '' and part or (current .. '\\' .. part)
+        create_dir(current)
+    end
+end
+
+local function um_log(msg)
+    client.color_log(180, 100, 255, '[Pasthetic] \0')
+    client.color_log(255, 255, 255, msg)
+end
+
+local function um_success(msg)
+    client.color_log(180, 100, 255, '[Pasthetic] \0')
+    client.color_log(100, 220, 100, msg)
+end
+
+local function um_error(msg)
+    client.color_log(250, 50, 75, '[Pasthetic] \0')
+    client.color_log(255, 255, 255, msg)
+end
+
+local function um_git_error(msg)
+    um_error(msg)
+    log_loader_reinstall_hint()
+end
+
+local function tohex32(n)
+    local chars = '0123456789abcdef'
+    local out = {}
+    for i = 8, 1, -1 do
+        local d = n % 16
+        out[i] = chars:sub(d + 1, d + 1)
+        n = (n - d) / 16
+    end
+    return table.concat(out)
+end
+
+local function adler32(data)
+    local a, b = 1, 0
+    for i = 1, #data do
+        a = (a + data:byte(i)) % 65521
+        b = (b + a) % 65521
+    end
+    return tohex32((b * 65536 + a) % 4294967296)
+end
+
+local function entry_path(path)
+    if type(path) ~= 'string' or path == '' then return nil end
+    path = path:gsub('\\', '/')
+    if path:find('%.%.', 1, true) ~= nil or path:sub(1, 1) == '/' or path:find(':', 1, true) ~= nil then
+        return nil
+    end
+    return path:gsub('/', '\\')
+end
+
+local function um_http_get(url, callback)
+    local ok, http = pcall(require, 'gamesense/http')
+    if not ok or type(http) ~= 'table' or type(http.get) ~= 'function' then
+        return false
+    end
+    local req_ok = pcall(http.get, url, function(success_flag, response)
+        local status, body
+        if type(success_flag) == 'table' and response == nil then
+            response = success_flag
+            success_flag = true
+        elseif type(success_flag) == 'string' and response == nil then
+            body = success_flag
+            status = 200
+            success_flag = true
+        elseif type(success_flag) == 'number' and type(response) == 'string' then
+            status = success_flag
+            body = response
+            success_flag = status == 200
+        end
+        if type(response) == 'table' then
+            status = response.status or response.status_code or response.code
+            body = response.body or response.data or response.content or response.text
+        elseif type(response) == 'string' and body == nil then
+            status = 200
+            body = response
+        end
+        local status_ok = status == nil or status == 200 or status == '200'
+        if success_flag and status_ok and type(body) == 'string' then
+            callback(body)
+        else
+            callback(nil, tostring(status))
+        end
+    end)
+    return req_ok
+end
+
+local function um_http_get_first(urls, callback)
+    local index = 1
+    local last_err = nil
+    local function try_next()
+        local url = urls[index]
+        if url == nil then callback(nil, last_err or 'all urls failed') return end
+        index = index + 1
+        local ok = um_http_get(url, function(body, err)
+            if type(body) == 'string' then callback(body, nil, url)
+            else last_err = err; try_next() end
+        end)
+        if not ok then last_err = 'gamesense/http unavailable'; try_next() end
+    end
+    try_next()
+    return true
+end
+
+local function decode_manifest(body)
+    if type(body) ~= 'string' or body == '' then return nil, 'empty body' end
+    body = body:gsub('^\239\187\191', ''):gsub('^%s+', '')
+    local parser = json.parse or json.decode
+    if type(parser) ~= 'function' then return nil, 'json parser unavailable' end
+    local ok, decoded = pcall(parser, body)
+    if not ok then return nil, 'json decode failed: ' .. tostring(decoded) end
+    if type(decoded) ~= 'table' or type(decoded.files) ~= 'table' then
+        return nil, 'invalid manifest structure'
+    end
+    return decoded
+end
+
+local function compare_manifest(manifest)
+    local pending = {}
+    if type(manifest) ~= 'table' or type(manifest.files) ~= 'table' then
+        return pending, false
+    end
+    for i = 1, #manifest.files do
+        local entry = manifest.files[i]
+        local local_path = entry_path(entry.path)
+        local ok_read, body = false, nil
+        if local_path ~= nil and readfile ~= nil then
+            ok_read, body = pcall(readfile, local_path)
+        end
+        if local_path == nil then
+            pending[#pending + 1] = { entry = entry, reason = 'bad path' }
+        elseif not ok_read or type(body) ~= 'string' then
+            pending[#pending + 1] = { entry = entry, reason = 'missing' }
+        elseif type(entry.size) == 'number' and #body ~= entry.size then
+            pending[#pending + 1] = { entry = entry, reason = 'size' }
+        elseif type(entry.checksum) == 'string' and adler32(body) ~= entry.checksum then
+            pending[#pending + 1] = { entry = entry, reason = 'checksum' }
+        end
+    end
+    return pending, true
+end
+
+local function get_base_urls(manifest)
+    local list = {}
+    if type(manifest.base_urls) == 'table' then
+        for i = 1, #manifest.base_urls do
+            if type(manifest.base_urls[i]) == 'string' then
+                list[#list + 1] = manifest.base_urls[i]
+            end
+        end
+    end
+    if type(manifest.base_url) == 'string' then
+        list[#list + 1] = manifest.base_url
+    end
+    for i = 1, #BASE_URLS do
+        list[#list + 1] = BASE_URLS[i]
+    end
+    return list
+end
+
+local um_state = {
+    busy            = false,
+    update_available = false,
+    pending         = {},
+    manifest        = nil,
+    manifest_body   = nil,
+}
+
+local update_manager = {}
+
+function update_manager.has_update()
+    return um_state.update_available and #um_state.pending > 0
+end
+
+function update_manager.is_busy()
+    return um_state.busy
+end
+
+function update_manager.check(callback)
+    if um_state.busy then
+        um_error('update check is already running')
+        if callback ~= nil then callback(false) end
+        return false
+    end
+    um_state.busy = true
+    um_log('checking updates...')
+
+    local started = um_http_get_first(MANIFEST_URLS, function(body, err)
+        local manifest, decode_err = decode_manifest(body)
+
+        if manifest == nil then
+            um_state.busy = false
+            um_state.update_available = false
+            um_state.pending = {}
+            um_git_error('update check failed: ' .. tostring(decode_err or err or 'manifest download failed'))
+            if callback ~= nil then callback(false) end
+            return
+        end
+
+        local pending, ok = compare_manifest(manifest)
+
+        if not ok then
+            um_state.busy = false
+            um_state.update_available = false
+            um_state.pending = {}
+            um_git_error('update check failed: manifest is invalid')
+            if callback ~= nil then callback(false) end
+            return
+        end
+
+        um_state.busy = false
+        um_state.manifest = manifest
+        um_state.manifest_body = body
+        um_state.pending = pending
+        um_state.update_available = #pending > 0
+
+        if um_state.update_available then
+            um_log(('%d file(s) need update'):format(#pending))
+        else
+            um_success('all files up to date')
+            if writefile ~= nil and type(body) == 'string' then
+                pcall(writefile, MANIFEST_PATH, body)
+            end
+        end
+
+        if callback ~= nil then callback(true) end
+    end)
+
+    if not started then
+        um_state.busy = false
+        um_state.update_available = false
+        um_state.pending = {}
+        um_git_error('update check failed: gamesense/http unavailable')
+        if callback ~= nil then callback(false) end
+        return false
+    end
+
+    return true
+end
+
+function update_manager.download(callback)
+    if um_state.busy then
+        um_error('download is already running')
+        return false
+    end
+
+    if not update_manager.has_update() or um_state.manifest == nil then
+        um_error('nothing to download; run check first')
+        return false
+    end
+
+    if writefile == nil then
+        um_git_error('download failed: writefile unavailable')
+        return false
+    end
+
+    um_state.busy = true
+
+    local files     = um_state.pending
+    local manifest  = um_state.manifest
+    local base_urls = get_base_urls(manifest)
+    local remaining = #files
+    local downloaded, failed = 0, 0
+
+    um_log(('downloading %d file(s)...'):format(remaining))
+
+    local function finish_one(ok)
+        if ok then downloaded = downloaded + 1 else failed = failed + 1 end
+        remaining = remaining - 1
+        if remaining > 0 then return end
+
+        um_state.busy = false
+
+        if failed == 0 then
+            um_state.pending = {}
+            um_state.update_available = false
+            if type(um_state.manifest_body) == 'string' then
+                pcall(writefile, MANIFEST_PATH, um_state.manifest_body)
+            end
+            um_success(('%d file(s) updated — reload script to apply'):format(downloaded))
+        else
+            um_git_error(('download partially failed: %d ok, %d failed'):format(downloaded, failed))
+        end
+
+        if callback ~= nil then callback(failed == 0) end
+    end
+
+    for i = 1, #files do
+        local entry     = files[i].entry or files[i]
+        local local_path = entry_path(entry.path)
+        if local_path == nil then
+            finish_one(false)
+        else
+            local urls = {}
+            for j = 1, #base_urls do
+                urls[#urls + 1] = base_urls[j] .. entry.path
+            end
+            local requested = um_http_get_first(urls, function(file_body)
+                if type(file_body) ~= 'string' then finish_one(false) return end
+                if type(entry.size) == 'number' and #file_body ~= entry.size then finish_one(false) return end
+                if type(entry.checksum) == 'string' and adler32(file_body) ~= entry.checksum then finish_one(false) return end
+                create_parent_dirs(local_path)
+                finish_one(writefile ~= nil and pcall(writefile, local_path, file_body))
+            end)
+            if not requested then finish_one(false) end
+        end
+    end
+
+    return true
+end
+
+-- ====================================================================
+-- Bootstrap: if modules are missing show download button and stop
+-- ====================================================================
+
+do
+    local installed = readfile ~= nil and (function()
+        local ok, result = pcall(readfile, 'pasthetic\\core.lua')
+        return ok and type(result) == 'string'
+    end)()
+
+    if not installed then
+        log_loader_reinstall_hint()
+
+        ui.new_button('CONFIG', 'Lua', 'Download Pasthetic modules', function()
+            if um_state.busy then return end
+            update_manager.check(function(ok)
+                if not ok or not update_manager.has_update() then
+                    if ok then um_log('nothing to download') end
+                    return
+                end
+                update_manager.download()
+            end)
+        end)
+        return
+    end
+end
+
+-- ====================================================================
+-- Module loading
+-- ====================================================================
+
+local core = require_pasthetic_module 'pasthetic/core'
+local pasthetic_constants = core.constants
+local const = core.static_data
+local text_fmt = core.text_fmt
+local pasthetic_localdb = require_pasthetic_module 'pasthetic/localdb'
+local pasthetic_config_system = require_pasthetic_module 'pasthetic/config_system'
+local pasthetic_utils = require_pasthetic_module 'pasthetic/utils'
+local event_system = require_pasthetic_module 'pasthetic/event_system'
+local pasthetic_ui_overrides = require_pasthetic_module 'pasthetic/ui_overrides'
+local pasthetic_menu_logic = require_pasthetic_module 'pasthetic/menu_logic'
+local pasthetic_software = require_pasthetic_module 'pasthetic/software'
+local pasthetic_text_anims = require_pasthetic_module 'pasthetic/text_anims'
+local pasthetic_localplayer = require_pasthetic_module 'pasthetic/localplayer'
+local pasthetic_statement = require_pasthetic_module 'pasthetic/statement'
+local pasthetic_engine_interfaces = require_pasthetic_module 'pasthetic/engine_interfaces'
+local pasthetic_exploit = require_pasthetic_module 'pasthetic/exploit'
+local pasthetic_menu = require_pasthetic_module 'pasthetic/menu'
+local pasthetic_windows = require_pasthetic_module 'pasthetic/windows'
+local pasthetic_external_config_ref = require_pasthetic_module 'pasthetic/external_config_ref'
+local pasthetic_diagnostics = require_pasthetic_module 'pasthetic/diagnostics'
+local pasthetic_resource_builder = require_pasthetic_module 'pasthetic/resource_builder'
+local pasthetic_config_controller = require_pasthetic_module 'pasthetic/config_controller'
+local pasthetic_bundle_patches = require_pasthetic_module 'pasthetic/bundle_patches'
+local pasthetic_bundle_loader = require_pasthetic_module 'pasthetic/bundle_loader'
+local pasthetic_runtime_modules = require_pasthetic_module 'pasthetic/runtime_modules'
+
+local contains = core.contains
+
+local script = core.new_script({
+    user_name = _USER_NAME
+})
+
+local bundle_loader_deps = {
+    client = client,
+    readfile = readfile,
+    loadstring = loadstring,
+    patches = pasthetic_bundle_patches
+}
+
+pasthetic_bundle_loader.load(bundle_loader_deps, 'colorskinscsgo.lua')
+
+local color = core.new_color({
+    ffi = ffi
+})
+
+local motion = core.new_motion({
+    globals = globals
+})
+
+local utils = pasthetic_utils.new({
+    ffi = ffi,
+    client = client,
+    entity = entity,
+    globals = globals
+})
+
+local ilocalize = pasthetic_engine_interfaces.new_ilocalize({
+    vtable_bind = vtable_bind
+})
+
+local surface = pasthetic_engine_interfaces.new_surface({
+    ffi = ffi,
+    vtable_bind = vtable_bind,
+    ilocalize = ilocalize
+})
+
+local software = pasthetic_software.new({
+    ui = ui,
+    utils = utils
+})
+
+local ui_callback = core.new_ui_callback({
+    ui = ui,
+    contains = contains
+})
+
+local ragebot = pasthetic_ui_overrides.new_ragebot({
+    ui = ui,
+    unpack = unpack
+})
+
+local override = pasthetic_ui_overrides.new_override({
+    ui = ui,
+    unpack = unpack
+})
+
+local logging = core.new_logging({
+    client = client,
+    cvar = cvar,
+    constants = pasthetic_constants
+})
+
+local diagnostics = pasthetic_diagnostics.new({
+    client = client,
+    prefix = '[Pasthetic]'
+})
+
+local localdb = pasthetic_localdb.new({
+    json = json,
+    base64 = base64,
+    logging = logging,
+    constants = pasthetic_constants,
+    readfile = readfile,
+    writefile = writefile
+})
+
+local config_system = pasthetic_config_system.new({
+    json = json,
+    base64 = base64,
+    client = client,
+    constants = pasthetic_constants,
+    unpack = unpack
+})
+
+local menu = pasthetic_menu.new({
+    ui = ui,
+    event_system = event_system,
+    unpack = unpack
+})
+
+local menu_logic = pasthetic_menu_logic.new({
+    menu = menu,
+    event_system = event_system,
+    logging = logging
+})
+
+local bundled_dormant_resource = nil
+
+local function wrap_external_config_ref(ref, on_fire)
+    return pasthetic_external_config_ref.wrap({ ui = ui }, ref, on_fire)
+end
+
+local bundled_dormant_loaded = pasthetic_bundle_loader.load(bundle_loader_deps, 'dormant.lua')
+
+if bundled_dormant_loaded then
+    bundled_dormant_resource = pasthetic_external_config_ref.register_bundled_dormant({
+        ui = ui,
+        config_system = config_system,
+        menu_logic = menu_logic,
+        menu = menu,
+        globals_table = _G
+    })
+end
+
+local text_anims = pasthetic_text_anims.new({
+    utils = utils,
+    color = color
+})
+
+local session = core.new_session()
+
+local localplayer = pasthetic_localplayer.new({
+    bit = bit,
+    client = client,
+    entity = entity,
+    vector = vector,
+    c_entity = c_entity,
+    utils = utils
+})
+
+local exploit = pasthetic_exploit.new({
+    client = client,
+    entity = entity,
+    globals = globals,
+    vector = vector,
+    utils = utils,
+    toticks = toticks
+})
+
+local statement = pasthetic_statement.new({
+    client = client,
+    localplayer = localplayer,
+    software = software
+})
+
+local resource = diagnostics:start('resource_builder', function()
+    return pasthetic_resource_builder.start({
+        script = script,
+        menu = menu,
+        ui = ui,
+        const = const,
+        ui_callback = ui_callback,
+        external_config_ref = pasthetic_external_config_ref,
+        config_system = config_system,
+        menu_logic = menu_logic,
+        software = software,
+        client = client,
+        utils = utils,
+        logging = logging,
+        color = color,
+        bundled_dormant_resource = bundled_dormant_resource,
+        contains = contains,
+        unpack = unpack
+    })
+end)
+diagnostics:health('resource_builder', pasthetic_resource_builder, { resource = resource })
+
+local windows = pasthetic_windows.new({
+    vector = vector,
+    client = client,
+    globals = globals,
+    ui = ui,
+    renderer = renderer,
+    menu = menu,
+    utils = utils
+})
+
+local config_controller = diagnostics:start('config_controller', function()
+    return pasthetic_config_controller.start({
+        resource = resource,
+        constants = pasthetic_constants,
+        localdb = localdb,
+        database = database,
+        logging = logging,
+        config_system = config_system,
+        windows = windows,
+        menu = menu,
+        menu_logic = menu_logic,
+        clipboard = clipboard,
+        utils = utils,
+        client = client,
+        ui = ui,
+        contains = contains
+    })
+end)
+diagnostics:health('config_controller', pasthetic_config_controller, { controller = config_controller })
+
+pasthetic_runtime_modules.start({
+    require_module = require_pasthetic_module,
+    script = script,
+    resource = resource,
+    diagnostics = diagnostics,
+    ui = ui,
+    entity = entity,
+    client = client,
+    globals = globals,
+    vector = vector,
+    plist = plist,
+    csgo_weapons = csgo_weapons,
+    ragebot = ragebot,
+    utils = utils,
+    unpack = unpack,
+    session = session,
+    renderer = renderer,
+    software = software,
+    exploit = exploit,
+    localplayer = localplayer,
+    override = override,
+    bit = bit,
+    toticks = toticks,
+    cvar = cvar,
+    ui_callback = ui_callback,
+    panorama = panorama,
+    clipboard = clipboard,
+    chat = chat,
+    localize = localize,
+    color = color,
+    motion = motion,
+    surface = surface,
+    text_fmt = text_fmt,
+    totime = totime,
+    c_entity = c_entity,
+    statement = statement,
+    ffi = ffi,
+    materialsystem = materialsystem,
+    has_update = function()
+        return update_manager.has_update()
+    end
+})
+
+-- ====================================================================
+-- Auto-update: check on startup, show download button if needed
+-- ====================================================================
+
+local download_update_btn = ui.new_button('CONFIG', 'Lua', 'Download latest version', function()
+    if um_state.busy then return end
+    if update_manager.has_update() then
+        update_manager.download(function(success)
+            if success then ui.set_visible(download_update_btn, false) end
+        end)
+    else
+        update_manager.check(function(ok)
+            if ok and update_manager.has_update() then
+                update_manager.download(function(success)
+                    if success then ui.set_visible(download_update_btn, false) end
+                end)
+            end
+        end)
+    end
+end)
+ui.set_visible(download_update_btn, false)
+
+update_manager.check(function(ok)
+    if ok and update_manager.has_update() then
+        ui.set_visible(download_update_btn, true)
+    end
+end)
