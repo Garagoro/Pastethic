@@ -304,6 +304,23 @@ function update_manager.is_busy()
     return um_state.busy
 end
 
+local function format_pending_files(pending)
+    local names = {}
+
+    for i = 1, #pending do
+        local entry = pending[i].entry or pending[i]
+        if type(entry) == 'table' and type(entry.path) == 'string' then
+            names[#names + 1] = entry.path
+        end
+    end
+
+    if #names == 0 then
+        return ''
+    end
+
+    return ' (' .. table.concat(names, ', ') .. ')'
+end
+
 function update_manager.check(callback)
     if um_state.busy then
         um_error('update check is already running')
@@ -343,7 +360,7 @@ function update_manager.check(callback)
         um_state.update_available = #pending > 0
 
         if um_state.update_available then
-            um_log(('%d file(s) need update'):format(#pending))
+            um_log(('%d file(s) need update%s'):format(#pending, format_pending_files(pending)))
         else
             um_success('all files up to date')
             if writefile ~= nil and type(body) == 'string' then
