@@ -223,6 +223,7 @@ function M.start(ctx)
                 globals = globals,
                 vector = vector,
                 renderer = renderer,
+                exploit = exploit,
                 utils = utils
             })
             end)

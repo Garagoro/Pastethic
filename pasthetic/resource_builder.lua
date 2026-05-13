@@ -2800,9 +2800,9 @@ local resource do
 
                 local is_ai_peek = ref.ai_peek.enabled:get() do
                     menu_logic.set(ref.ai_peek.enabled, true)
+                    menu_logic.set(ref.ai_peek.hotkey, false)
 
                     if is_ai_peek then
-                        menu_logic.set(ref.ai_peek.hotkey, true)
                         menu_logic.set(ref.ai_peek.min_damage_label, true)
                         menu_logic.set(ref.ai_peek.min_damage_override, true)
                         menu_logic.set(ref.ai_peek.scan_all, true)

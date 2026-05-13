@@ -12449,6 +12449,8 @@ function M.start(deps)
     local ref = resource.main.ragebot.ai_peek
     local rage_min_damage = { ui.reference('Rage', 'Aimbot', 'Minimum damage') }
     local rage_damage_override = { ui.reference('Rage', 'Aimbot', 'Minimum damage override') }
+    local ref_quick_peek = { ui.reference('Rage', 'Other', 'Quick peek assist') }
+    local ref_target_selection = ui.reference('Rage', 'Aimbot', 'Target selection')
 
     local hitbox_names = {
         'Head',
@@ -12482,6 +12484,11 @@ function M.start(deps)
     local STALL_UPDATES_MIN = 2
     local STALL_SPEED_MIN = 36
     local ROLLBACK_HOLD_TICKS = 12
+    local COMMIT_EXPOSURE_DAMAGE = 5
+    local COMMIT_LOCK_TICKS = 6
+    local COMMIT_DISTANCE = 8
+    local RETURN_CLEAR_DISTANCE = 4
+    local AI_PEEK_TARGET_SELECTION = 'Best hit chance'
 
     local function safe_get(item, fallback)
         if item == nil then
@@ -12862,6 +12869,72 @@ function M.start(deps)
         }
     end
 
+    local function is_position_hittable(safety)
+        return safety ~= nil
+            and ((safety.incoming_damage or 0) > COMMIT_EXPOSURE_DAMAGE
+                or (safety.exposure_count or 0) > 0)
+    end
+
+    local function is_commit_candidate_safe(candidate, current_safety)
+        if candidate == nil or candidate.start == nil then
+            return false
+        end
+
+        if (candidate.bad_record_exposure or 0) > 0 then
+            return false
+        end
+
+        local current_exposure = current_safety ~= nil and (current_safety.exposure_count or 0) or 0
+        local current_damage = current_safety ~= nil and (current_safety.incoming_damage or 0) or 0
+
+        if (candidate.exposure_count or 0) > math.max(1, current_exposure) then
+            return false
+        end
+
+        if (candidate.incoming_damage or 0) > math.max(COMMIT_EXPOSURE_DAMAGE, current_damage + 5) then
+            return false
+        end
+
+        return true
+    end
+
+    local function clear_commit()
+        if aipeek.data ~= nil then
+            aipeek.data.commit = nil
+        end
+    end
+
+    local function set_target_selection_override()
+        if aipeek.data == nil or ref_target_selection == nil then
+            return
+        end
+
+        if aipeek.data.target_selection_before == nil then
+            aipeek.data.target_selection_before = safe_get(ref_target_selection, nil)
+        end
+
+        pcall(ui.set, ref_target_selection, AI_PEEK_TARGET_SELECTION)
+    end
+
+    local function restore_target_selection()
+        if aipeek.data == nil or aipeek.data.target_selection_before == nil or ref_target_selection == nil then
+            return
+        end
+
+        pcall(ui.set, ref_target_selection, aipeek.data.target_selection_before)
+        aipeek.data.target_selection_before = nil
+    end
+
+    local function start_native_return()
+        if aipeek.data == nil then
+            return
+        end
+
+        aipeek.data.native_return = true
+        clear_commit()
+        restore_target_selection()
+    end
+
     local function move_to(cmd, pos)
         local me = entity.get_local_player()
 
@@ -12885,6 +12958,11 @@ function M.start(deps)
         if forward and side then
             cmd.forwardmove = forward
             cmd.sidemove = side
+
+            cmd.in_forward = forward > 1 and 1 or 0
+            cmd.in_back = forward < -1 and 1 or 0
+            cmd.in_moveright = side > 1 and 1 or 0
+            cmd.in_moveleft = side < -1 and 1 or 0
         end
     end
 
@@ -13013,12 +13091,15 @@ function M.start(deps)
     end
 
     local function reset()
+        restore_target_selection()
         aipeek.data = nil
         records = {}
     end
 
     local function is_active()
-        return ref.enabled:get() and ref.hotkey:get()
+        return ref.enabled:get()
+            and safe_get(ref_quick_peek[1], false) == true
+            and safe_get(ref_quick_peek[2], false) == true
     end
 
     local function update_data()
@@ -13098,14 +13179,18 @@ function M.start(deps)
             or cmd.in_moveright == 1
 
         if cmd.in_attack == 1 or cmd.in_attack == true then
-            aipeek.data['return'] = true
+            start_native_return()
         end
 
-        if origin:dist(aipeek.data.positions.center) < 0.2 then
-            aipeek.data['return'] = false
+        if origin:dist(aipeek.data.positions.center) <= RETURN_CLEAR_DISTANCE then
+            aipeek.data.native_return = false
+            clear_commit()
+            restore_target_selection()
         end
 
-        if not aipeek.data['return'] then
+        if not aipeek.data.native_return then
+            set_target_selection_override()
+
             for _, point in next, aipeek.data.positions.other do
                 local total_damage = 0
                 point[1] = {
@@ -13214,20 +13299,42 @@ function M.start(deps)
             return (a.target_distance or a.start:dist(a['end'])) < (b.target_distance or b.start:dist(b['end']))
         end)
 
-        local move_to_pos = aipeek.data.positions.center
+        local move_to_pos = nil
+        local best_aim = aipeek.data.aim[1]
 
-        if aipeek.data.aim[1] ~= nil and aipeek.data.aim[1].start ~= nil then
-            move_to_pos = aipeek.data.aim[1].start
+        if not aipeek.data.native_return then
+            local center_distance = origin:dist2d(aipeek.data.positions.center)
+            local current_safety = center_distance > COMMIT_DISTANCE
+                and evaluate_position_safety(me, origin)
+                or nil
+            local commit_point = is_position_hittable(current_safety)
+
+            if commit_point then
+                local commit = aipeek.data.commit
+                local tickcount = globals.tickcount()
+
+                if commit ~= nil and commit.until_tick >= tickcount then
+                    move_to_pos = commit.position
+                elseif is_commit_candidate_safe(best_aim, current_safety) then
+                    aipeek.data.commit = {
+                        position = vector_copy(best_aim.start),
+                        until_tick = tickcount + COMMIT_LOCK_TICKS
+                    }
+                    move_to_pos = best_aim.start
+                else
+                    start_native_return()
+                end
+            elseif best_aim ~= nil and best_aim.start ~= nil then
+                clear_commit()
+                move_to_pos = best_aim.start
+            else
+                clear_commit()
+            end
+        else
+            clear_commit()
         end
 
-        if move_to_pos ~= nil and (not is_move or aipeek.data['return']) then
-            if aipeek.data['return'] then
-                cmd.in_forward = 0
-                cmd.in_back = 0
-                cmd.in_moveleft = 0
-                cmd.in_moveright = 0
-            end
-
+        if move_to_pos ~= nil and not is_move then
             move_to(cmd, move_to_pos)
         end
     end
@@ -13273,7 +13380,7 @@ function M.start(deps)
 
     local function on_aim_fire()
         if aipeek.data ~= nil then
-            aipeek.data['return'] = true
+            start_native_return()
         end
     end
 
@@ -17847,9 +17954,9 @@ local resource do
 
                 local is_ai_peek = ref.ai_peek.enabled:get() do
                     menu_logic.set(ref.ai_peek.enabled, true)
+                    menu_logic.set(ref.ai_peek.hotkey, false)
 
                     if is_ai_peek then
-                        menu_logic.set(ref.ai_peek.hotkey, true)
                         menu_logic.set(ref.ai_peek.min_damage_label, true)
                         menu_logic.set(ref.ai_peek.min_damage_override, true)
                         menu_logic.set(ref.ai_peek.scan_all, true)
@@ -18676,6 +18783,7 @@ function M.start(ctx)
                 globals = globals,
                 vector = vector,
                 renderer = renderer,
+                exploit = exploit,
                 utils = utils
             })
             end)
