@@ -539,14 +539,16 @@ local apply_saved_skin_for_current_weapon = function()
     saved = tonumber(saved)
     if saved == nil then return false end
 
+    local changed = false
     if ui.get(ctx.refs.skins_weapon_skin) ~= saved then
         ctx.syncing_skin = true
         ui.set(ctx.refs.skins_weapon_skin, saved)
         ctx.syncing_skin = false
+        changed = true
     end
 
     ctx.current_paintkit = saved
-    return true
+    return changed
 end
 
 local apply_config_for_current_skin
