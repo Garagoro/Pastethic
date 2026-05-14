@@ -37,14 +37,16 @@ function M.wrap(deps, ref, on_fire)
     return item
 end
 
-function M.register_bundled_dormant(deps)
+function M.register_dormant(deps)
     local ui = assert(deps.ui, 'external_config_ref: ui dependency is required')
     local config_system = assert(deps.config_system, 'external_config_ref: config_system dependency is required')
     local menu_logic = assert(deps.menu_logic, 'external_config_ref: menu_logic dependency is required')
     local menu = assert(deps.menu, 'external_config_ref: menu dependency is required')
     local globals_table = deps.globals_table or _G
 
-    local dormant_api = rawget(globals_table, 'pasthetic_dormant') or rawget(globals_table, 'aesthetic_dormant')
+    local dormant_api = deps.dormant_api
+        or rawget(globals_table, 'pasthetic_dormant')
+        or rawget(globals_table, 'aesthetic_dormant')
 
     if type(dormant_api) ~= 'table' or type(dormant_api.refs) ~= 'table' then
         return nil

@@ -5394,265 +5394,141 @@ end
 
 return M
 ]=],
-    ["pasthetic/bundle_loader"] = [[local M = {}
+    ["pasthetic/clantag"] = [[local M = {}
 
--- Loads external Lua bundles from pasthetic\bundles first, with optional patch hooks.
--- This module only reads/compiles/runs a bundle requested by the entrypoint.
+function M.start(deps)
+    local resource = assert(deps.resource, 'clantag: resource dependency is required')
+    local client = assert(deps.client, 'clantag: client dependency is required')
+    local globals = assert(deps.globals, 'clantag: globals dependency is required')
+    local utils = assert(deps.utils, 'clantag: utils dependency is required')
 
-local function log_err(client, msg)
-    if client == nil then return end
-    client.color_log(250, 50, 75, '[Pasthetic] \0')
-    client.color_log(255, 255, 255, msg)
-end
+    local ref = resource.main.miscellaneous.clantag
+    local last_tag = nil
+    local last_index = nil
+    local frame_time = 0.25
 
-function M.load(deps, label, paths)
-    deps = deps or {}
-    paths = paths or {}
-
-    local client = deps.client
-    local readfile = deps.readfile
-    local loadstring = deps.loadstring
-    local local_path = deps.local_path or function(path) return path end
-    local patches = deps.patches
-
-    if loadstring == nil then
-        log_err(client, 'cannot load bundled ' .. label .. ': loadstring unavailable')
-        return false
-    end
-    local bundled_path = local_path('pasthetic\\bundles\\' .. label)
-    local search_paths = { bundled_path }
-
-    for i = 1, #paths do
-        search_paths[#search_paths + 1] = paths[i]
-    end
-    if readfile == nil then
-        log_err(client, 'cannot load bundled ' .. label .. ': readfile unavailable')
-        return false
+    if type(client.set_clan_tag) ~= 'function' then
+        return
     end
 
-    for i = 1, #search_paths do
-        local ok_read, source = pcall(readfile, search_paths[i])
+    local frames = {
+        '[---------]',
+        '[p--------]',
+        '[pa-------]',
+        '[pas------]',
+        '[past-----]',
+        '[pasth----]',
+        '[pasthe---]',
+        '[pasthet--]',
+        '[pastheti-]',
+        '[pasthetic]',
+        '[p4sthetic]',
+        '[p4$thetic]',
+        '[p4$7hetic]',
+        '[p4$7he7ic]',
+        '[p4$7he71c]',
+        '[pa$7he71c]',
+        '[pas7he71c]',
+        '[pasthe71c]',
+        '[pasthet1c]',
+        '[pasthetic]',
+        '[pastheti<]',
+        '[pasthet<c]',
+        '[pasthe<ic]',
+        '[pasth<tic]',
+        '[past<etic]',
+        '[pas<hetic]',
+        '[pa<thetic]',
+        '[p<sthetic]',
+        '[<asthetic]',
+        '[pasthetic]',
+        '[pastheti-]',
+        '[pasthet--]',
+        '[pasthe---]',
+        '[pasth----]',
+        '[past-----]',
+        '[pas------]',
+        '[pa-------]',
+        '[p--------]',
+        '[---------]'
+    }
 
-        if ok_read and type(source) == 'string' and #source > 0 then
-            if label == 'colorskinscsgo.lua' and patches ~= nil and patches.patch_colorskins ~= nil then
-                source = patches.patch_colorskins(source)
-            end
-
-            local chunk, load_error = loadstring(source, '@' .. search_paths[i])
-
-            if chunk ~= nil then
-                local ok, runtime_error = pcall(chunk)
-
-                if ok then
-                    return true
-                end
-
-                log_err(client, 'failed to run bundled ' .. label .. ': ' .. tostring(runtime_error))
-                return false
-            end
-
-            log_err(client, 'failed to compile bundled ' .. label .. ': ' .. tostring(load_error))
-            return false
-        elseif i == #search_paths then
-            log_err(client, 'failed to find bundled ' .. label .. ' (tried: ' .. bundled_path .. ')')
+    local function set_tag(tag)
+        if tag == last_tag then
+            return
         end
+
+        client.set_clan_tag(tag)
+        last_tag = tag
     end
 
-    return false
-end
+    local function get_synced_time()
+        if type(globals.tickcount) == 'function' and type(globals.tickinterval) == 'function' then
+            return globals.tickcount() * globals.tickinterval()
+        end
 
+        if type(globals.curtime) == 'function' then
+            return globals.curtime()
+        end
+
+        return globals.realtime()
+    end
+
+    local function get_frame()
+        local index = math.floor(get_synced_time() / frame_time) % #frames + 1
+
+        return frames[index], index
+    end
+
+    local function reset()
+        last_tag = nil
+        last_index = nil
+        client.set_clan_tag('')
+    end
+
+    local function on_paint()
+        if not ref.enabled:get() then
+            if last_tag ~= nil then
+                reset()
+            end
+            return
+        end
+
+        local tag, index = get_frame()
+        if index == last_index then
+            return
+        end
+
+        last_index = index
+        set_tag(tag)
+    end
+
+    local function on_enabled(item)
+        local enabled = item:get()
+
+        if not enabled then
+            reset()
+        end
+
+        utils.event_callback('shutdown', reset, enabled)
+    end
+
+    utils.event_callback('paint', on_paint, true)
+    ref.enabled:set_callback(on_enabled, true)
+end
 
 return M
 ]],
-    ["pasthetic/bundle_patches"] = [=[local M = {}
+    ["pasthetic/colorskinscsgo"] = [=[local M = {}
+local started = false
 
--- Patch the external colorskins bundle so it cooperates with Pasthetic configs/runtime.
--- Keep this module data-only: no UI, callbacks, or globals are created here.
-function M.patch_colorskins(source)
-    return source
-end
-
-function M._patch_colorskins_legacy(source)
-    source = source:gsub('\r\n', '\n')
-
-    source = source:gsub(
-        'last_weapon_ent = nil,\n',
-        'last_weapon_ent = nil,\n    last_skin_key = nil,\n    refresh_token = 0,\n',
-        1
-    )
-
-    source = source:gsub(
-        'local force_update = function%(%)[\r\n]+%s*ui%.set%(ctx%.refs%.skins_enabled, false%)[\r\n]+%s*client%.delay_call%(0%.6, ui%.set, ctx%.refs%.skins_enabled, true%)[\r\n]+end',
-        'local ensure_skinchanger_enabled = function()\n    if not ui.get(ctx.refs.skins_enabled) then\n        ui.set(ctx.refs.skins_enabled, true)\n    end\nend\n\nlocal force_update = function()\n    ui.set(ctx.refs.skins_enabled, false)\n    client.delay_call(0.8, ensure_skinchanger_enabled)\nend\n\nlocal fast_force_update = function()\n    ctx.refresh_token = (ctx.refresh_token or 0) + 1\n    ui.set(ctx.refs.skins_enabled, false)\n    client.delay_call(0.8, ensure_skinchanger_enabled)\nend',
-        1
-    )
-
-    source = source:gsub(
-        'local set_paintkit_colors = function%( paintkit %)',
-        [[local schedule_apply_config = function(should_force_update)
-    local delays = { 0.8 }
-
-    for i = 1, #delays do
-        client.delay_call(delays[i], function()
-            apply_saved_skin_for_current_weapon()
-            local applied = apply_config_for_current_skin(false)
-            if should_force_update and i <= 3 and applied then
-                fast_force_update()
-            end
-end
-
-local refresh_active_weapon_skin = function()
-    local player = entity.get_local_player()
-    if player == nil then return end
-
-    local weapon = entity.get_player_weapon(player)
-    if weapon == nil then return end
-
-    apply_saved_skin_for_current_weapon()
-    local team_weapon_key = get_weapon_team_key()
-    local key, paintkit, weapon_id, team, legacy_key = get_skin_key()
-    if weapon == ctx.last_weapon_ent and key == ctx.last_skin_key and team_weapon_key == ctx.last_weapon_team_key then return end
-
-    ctx.last_weapon_ent = weapon
-    ctx.last_skin_key = key
-    ctx.last_weapon_team_key = team_weapon_key
-
-    local has_saved_colors = (
-        key ~= nil
-        and (
-            ctx.skin_color_config[key] ~= nil
-            or (legacy_key ~= nil and ctx.skin_color_config[legacy_key] ~= nil)
-        )
-    )
-
-    if has_saved_colors and paintkit ~= nil then
-        ctx.applied_skins[key] = nil
-        ctx.paintkit_owner[paintkit] = nil
-        ensure_skinchanger_enabled()
+function M.start()
+    if started then
+        return rawget(_G, 'pasthetic_colorskins')
     end
 
-    if apply_config_for_current_skin(false) then
-        fast_force_update()
-    end
-
-    if has_saved_colors then
-        client.delay_call(0.8, ensure_skinchanger_enabled)
-    end
-
-    schedule_apply_config(true)
-end
-
-local set_paintkit_colors = function( paintkit )]],
-        1
-    )
-
-    source = source:gsub(
-        [[    force_update()
-end
-
-local weapon_skin_cb = function()]],
-        [[    force_update()
-    client.delay_call(0.8, function() set_paintkit_colors(ctx.current_paintkit); apply_config_for_current_skin(true) end)
-end
-
-local weapon_skin_cb = function()]],
-        1
-    )
-
-    source = source:gsub(
-        [[local startup_skin_refresh = function()
-    client.delay_call(0.2, function() apply_config_for_current_skin(true) end)
-    client.delay_call(0.8, function() apply_config_for_current_skin(true) end)
-    client.delay_call(1.4, function() apply_config_for_current_skin(true) end)
-end]],
-        [[local startup_skin_refresh = function()
-    client.delay_call(0.05, refresh_active_weapon_skin)
-    client.delay_call(0.8, function() schedule_apply_config(true) end)
-end]],
-        1
-    )
-
-    source = source:gsub(
-        [[local startup_skin_refresh = function()
-    client.delay_call(0.2, function() apply_saved_skin_for_current_weapon(); apply_config_for_current_skin(true) end)
-    client.delay_call(0.8, function() apply_saved_skin_for_current_weapon(); apply_config_for_current_skin(true) end)
-    client.delay_call(1.4, function() apply_saved_skin_for_current_weapon(); apply_config_for_current_skin(true) end)
-end]],
-        [[local startup_skin_refresh = function()
-    client.delay_call(0.05, refresh_active_weapon_skin)
-    client.delay_call(0.8, function() schedule_apply_config(true) end)
-end]],
-        1
-    )
-
-    source = source:gsub(
-        [[startup_skin_refresh()
-client.set_event_callback("paint", function()
-    local player = entity.get_local_player()
-    if player == nil then return end
-
-    local weapon = entity.get_player_weapon(player)
-    if weapon == nil or weapon == ctx.last_weapon_ent then return end
-
-    ctx.last_weapon_ent = weapon
-    client.delay_call(0.1, function() apply_config_for_current_skin(true) end)
-    client.delay_call(0.5, function() apply_config_for_current_skin(true) end)
-end)]],
-        [[startup_skin_refresh()
-client.set_event_callback("setup_command", refresh_active_weapon_skin)
-client.set_event_callback("item_equip", function(event)
-    if client.userid_to_entindex(event.userid) ~= entity.get_local_player() then return end
-
-    ctx.last_weapon_ent = nil
-    ctx.last_skin_key = nil
-    ctx.last_weapon_team_key = nil
-    schedule_apply_config(true)
-end)
-client.set_event_callback("paint", function()
-    refresh_active_weapon_skin()
-end)]],
-        1
-    )
-
-    source = source:gsub(
-        [[startup_skin_refresh()
-client.set_event_callback("paint", function()
-    local player = entity.get_local_player()
-    if player == nil then return end
-
-    local weapon = entity.get_player_weapon(player)
-    local team_weapon_key = get_weapon_team_key()
-    if weapon == nil or (weapon == ctx.last_weapon_ent and team_weapon_key == ctx.last_weapon_team_key) then return end
-
-    ctx.last_weapon_ent = weapon
-    ctx.last_weapon_team_key = team_weapon_key
-    client.delay_call(0.1, function() apply_saved_skin_for_current_weapon(); apply_config_for_current_skin(true) end)
-    client.delay_call(0.5, function() apply_saved_skin_for_current_weapon(); apply_config_for_current_skin(true) end)
-end)]],
-        [[startup_skin_refresh()
-client.set_event_callback("setup_command", refresh_active_weapon_skin)
-client.set_event_callback("item_equip", function(event)
-    if client.userid_to_entindex(event.userid) ~= entity.get_local_player() then return end
-
-    ctx.last_weapon_ent = nil
-    ctx.last_skin_key = nil
-    ctx.last_weapon_team_key = nil
-    schedule_apply_config(true)
-end)
-client.set_event_callback("paint", function()
-    refresh_active_weapon_skin()
-end)]],
-        1
-    )
-
-    return source
-end
-
-
-
-return M
-]=],
-    ["pasthetic/bundles/colorskinscsgo"] = [=[local ffi = require("ffi")
+    started = true
+local ffi = require("ffi")
 
 local DB_KEY = "colorskinscsgo_skin_color_config_v1"
 local CONFIG_FILE = "colorskinscsgo_config.json"
@@ -6570,577 +6446,11 @@ end)
 
 
 
-]=],
-    ["pasthetic/bundles/dormant"] = [[-- local variables for API functions. any changes to the line below will be lost on re-generation
-local client_visible, client_eye_position, client_log, client_trace_bullet, entity_get_bounding_box, entity_get_local_player, entity_get_origin, entity_get_player_name, entity_get_player_resource, entity_get_player_weapon, entity_get_prop, entity_is_dormant, entity_is_enemy, globals_curtime, globals_maxplayers, globals_tickcount, math_max, renderer_indicator, string_format, ui_get, ui_new_checkbox, ui_new_hotkey, ui_reference, ui_set_callback, sqrt, unpack, entity_is_alive, plist_get = client.visible, client.eye_position, client.log, client.trace_bullet, entity.get_bounding_box, entity.get_local_player, entity.get_origin, entity.get_player_name, entity.get_player_resource, entity.get_player_weapon, entity.get_prop, entity.is_dormant, entity.is_enemy, globals.curtime, globals.maxplayers, globals.tickcount, math.max, renderer.indicator, string.format, ui.get, ui.new_checkbox, ui.new_hotkey, ui.reference, ui.set_callback, sqrt, unpack, entity.is_alive, plist.get
 
-local ffi = require "ffi"
-local vector = require "vector"
-local weapons = require "gamesense/csgo_weapons"
-
-local native_GetClientEntity = vtable_bind("client_panorama.dll", "VClientEntityList003", 3, "void*(__thiscall*)(void*,int)")
-local native_IsWeapon = vtable_thunk(165, "bool(__thiscall*)(void*)")
-local native_GetInaccuracy = vtable_thunk(482, "float(__thiscall*)(void*)")
-
-
-local ref = {
-    mindmg = ui_reference("RAGE", "Aimbot", "Minimum damage"),
-    dormantEsp = ui_reference("VISUALS", "Player ESP", "Dormant"),
-}
-
-local menu = {
-    dormant_switch = ui_new_checkbox("AA", "Anti-aimbot angles", "Dormant aimbot"),
-    dormant_key = ui_new_hotkey("AA", "Anti-aimbot angles", "Dormant aimbot", true),
-    dormant_mindmg = ui.new_slider("AA", "Anti-aimbot angles", "Dormant minimum damage", 0, 100, 10, true),
-    dormant_indicator = ui_new_checkbox("AA", "Anti-aimbot angles", "Dormant indicator"),
-}
-
-local player_info_prev = {}
-local position_memory = {}
-local real_position_memory = {}
-local roundStarted = 0
-local dormant_esp_restore = nil
-local callbacks_registered = false
-local MAX_DORMANT_CACHE_TICKS = 128
-local MAX_DORMANT_REAL_DISTANCE_SQR = 650 * 650
-local MAX_DORMANT_REAL_Z_DELTA = 160
-local MIN_DORMANT_ALPHA = 0.18
-local MIN_DORMANT_ORIGIN_LENGTH_SQR = 64 * 64
-
-local function modify_velocity(e, goalspeed)
-    local minspeed = math.sqrt((e.forwardmove * e.forwardmove) + (e.sidemove * e.sidemove))
-    if goalspeed <= 0 or minspeed <= 0 then
-        return
-    end
-
-    if e.in_duck == 1 then
-        goalspeed = goalspeed * 2.94117647
-    end
-
-    if minspeed <= goalspeed then
-        return
-    end
-
-    local speedfactor = goalspeed / minspeed
-    e.forwardmove = e.forwardmove * speedfactor
-    e.sidemove = e.sidemove * speedfactor
+    return rawget(_G, 'pasthetic_colorskins')
 end
 
-local estimated_points = {
-    { name = "stomach", z = 40, weight = 1.00, bonus_damage = 0 },
-    { name = "chest", z = 52, weight = 0.82, bonus_damage = 0 },
-    { name = "pelvis", z = 30, weight = 0.72, bonus_damage = 0 },
-    { name = "head", z = 62, weight = 0.35, bonus_damage = 5 },
-}
-
-local function scan_estimated_points(lp, eyepos, origin, mindmg)
-    local best_point, best_damage, best_name
-    local best_score = -1
-
-    for i = 1, #estimated_points do
-        local data = estimated_points[i]
-        local point = origin + vector(0, 0, data.z)
-        local _, damage = client_trace_bullet(lp, eyepos.x, eyepos.y, eyepos.z, point.x, point.y, point.z, true)
-        damage = damage or 0
-
-        local hidden = not client_visible(point.x, point.y, point.z)
-        if damage > (mindmg + data.bonus_damage) and hidden then
-            local score = damage * data.weight
-            if score > best_score then
-                best_score = score
-                best_point = point
-                best_damage = damage
-                best_name = data.name
-            end
-        end
-    end
-
-    return best_point, best_damage, best_name
-end
-
-local function is_origin_stable(origin, old_origin, alpha, old_alpha)
-    if old_origin == nil or old_alpha == nil then
-        return false
-    end
-
-    local dx = origin.x - old_origin.x
-    local dy = origin.y - old_origin.y
-    local dz = origin.z - old_origin.z
-
-    return (dx * dx + dy * dy + dz * dz) <= 64 and alpha > 0.795 and old_alpha > 0.75
-end
-
-local function get_accuracy_limit(weapon)
-    if weapon.type == "sniperrifle" then
-        return 0.009
-    end
-
-    if weapon.is_revolver then
-        return 0.0065
-    end
-
-    if weapon.type == "pistol" then
-        return 0.0075
-    end
-
-    return 0.009
-end
-
-local function is_valid_origin(x, y, z)
-    if x == nil or y == nil or z == nil then
-        return false
-    end
-
-    if x ~= x or y ~= y or z ~= z then
-        return false
-    end
-
-    if math.abs(x) > 32768 or math.abs(y) > 32768 or z < -4096 or z > 8192 then
-        return false
-    end
-
-    return (x * x + y * y + z * z) > MIN_DORMANT_ORIGIN_LENGTH_SQR
-end
-
-local function is_valid_dormant_box(x1, y1, x2, y2, alpha)
-    if x1 == nil or y1 == nil or x2 == nil or y2 == nil or alpha == nil then
-        return false
-    end
-
-    if alpha < MIN_DORMANT_ALPHA or alpha > 1.05 then
-        return false
-    end
-
-    return x2 > x1 and y2 > y1
-end
-
-local function remember_real_position(player, origin)
-    real_position_memory[player] = origin
-end
-
-local function forget_position(player)
-    position_memory[player] = nil
-end
-
-local function is_plausible_from_real_position(player, origin)
-    local cached = real_position_memory[player]
-
-    if cached == nil or origin == nil then
-        return false
-    end
-
-    local dx = origin.x - cached.x
-    local dy = origin.y - cached.y
-    local dz = origin.z - cached.z
-
-    return math.abs(dz) <= MAX_DORMANT_REAL_Z_DELTA and (dx * dx + dy * dy + dz * dz) <= MAX_DORMANT_REAL_DISTANCE_SQR
-end
-
-local function remember_position(player, origin, tickcount, alpha)
-    position_memory[player] = {
-        origin = origin,
-        tick = tickcount,
-        alpha = alpha or 1
-    }
-end
-
-local function get_remembered_position(player, tickcount)
-    local cached = position_memory[player]
-    if cached == nil then
-        return nil
-    end
-
-    if tickcount - cached.tick > MAX_DORMANT_CACHE_TICKS then
-        return nil
-    end
-
-    return cached.origin, cached.alpha
-end
-
-local function get_weapon_pointer(lp, weapon_index)
-    local weapon_handle = entity_get_prop(lp, "m_hActiveWeapon")
-    local weapon_ptr = weapon_handle ~= nil and native_GetClientEntity(bit.band(weapon_handle, 0xFFF)) or nil
-
-    if weapon_ptr ~= nil and native_IsWeapon(weapon_ptr) then
-        return weapon_ptr
-    end
-
-    weapon_ptr = weapon_index ~= nil and native_GetClientEntity(weapon_index) or nil
-    if weapon_ptr ~= nil and native_IsWeapon(weapon_ptr) then
-        return weapon_ptr
-    end
-
-    return nil
-end
-
-local function on_setup_command(cmd)
-    if not ui_get(menu.dormant_switch) then
-        return
-    end
-
-    local lp = entity_get_local_player()
-    if lp == nil or not entity_is_alive(lp) then
-        player_info_prev = {}
-        position_memory = {}
-        real_position_memory = {}
-        return
-    end
-
-    local my_weapon = entity_get_player_weapon(lp)
-    if not my_weapon then
-        return
-    end
-
-    local ent = get_weapon_pointer(lp, my_weapon)
-    local inaccuracy = 0
-    if ent ~= nil and native_IsWeapon(ent) then
-        inaccuracy = native_GetInaccuracy(ent) or 0
-    else
-        inaccuracy = entity_get_prop(my_weapon, "m_fAccuracyPenalty") or 0
-    end
-
-    local tickcount = globals_tickcount()
-    local player_resource = entity_get_player_resource()
-    if player_resource == nil then
-        return
-    end
-
-    local eye_x, eye_y, eye_z = client_eye_position()
-    if eye_x == nil then
-        return
-    end
-
-    local eyepos = vector(eye_x, eye_y, eye_z)
-    local simtime = entity_get_prop(lp, "m_flSimulationTime") or globals_curtime()
-    local weapon = weapons(my_weapon)
-    if weapon == nil then
-        return
-    end
-
-    local scoped = entity_get_prop(lp, "m_bIsScoped") == 1
-    local flags = entity_get_prop(lp, 'm_fFlags') or 0
-    local onground = bit.band(flags, bit.lshift(1, 0))
-    if tickcount < roundStarted then return end -- to prevent shooting at ghost dormant esp @ the beginning of round
-
-    local can_shoot
-    if weapon.is_revolver then -- for some reason can_shoot returns always false with r8 despite all 3 props being true, no idea why
-        can_shoot = simtime > (entity_get_prop(my_weapon, "m_flNextPrimaryAttack") or math.huge) -- doing this fixes it ><
-    elseif weapon.is_melee_weapon then
-        can_shoot = false
-    else
-        can_shoot = simtime > math_max(
-            entity_get_prop(lp, "m_flNextAttack") or math.huge,
-            entity_get_prop(my_weapon, "m_flNextPrimaryAttack") or math.huge,
-            entity_get_prop(my_weapon, "m_flNextSecondaryAttack") or 0
-        )
-    end
-
-    -- new player info
-    local player_info = {}
-
-    -- loop through all players and continue if they're connected
-    for player=1, globals_maxplayers() do
-        if entity_get_prop(player_resource, "m_bConnected", player) == 1 then
-            if plist_get(player, "Add to whitelist") then goto skip end
-            if entity_is_enemy(player) and entity_is_alive(player) then
-                local can_hit
-
-                local origin_x, origin_y, origin_z = entity_get_origin(player)
-                local x1, y1, x2, y2, alpha_multiplier = entity_get_bounding_box(player) -- grab alpha of the dormant esp
-                local has_dormant_snapshot = origin_x ~= nil or origin_y ~= nil or origin_z ~= nil or alpha_multiplier ~= nil
-                local current_origin = is_valid_origin(origin_x, origin_y, origin_z) and vector(origin_x, origin_y, origin_z) or nil
-
-                if not entity_is_dormant(player) then
-                    if current_origin ~= nil then
-                        remember_position(player, current_origin, tickcount, 1)
-                        remember_real_position(player, current_origin)
-                        player_info[player] = {current_origin, 1, false, 0}
-                    end
-                    goto skip
-                end
-
-                local origin = nil
-                local origin_alpha = alpha_multiplier
-                if has_dormant_snapshot then
-                    if current_origin ~= nil
-                        and is_valid_dormant_box(x1, y1, x2, y2, alpha_multiplier)
-                        and is_plausible_from_real_position(player, current_origin)
-                    then
-                        origin = current_origin
-                        remember_position(player, origin, tickcount, alpha_multiplier)
-                    else
-                        forget_position(player)
-                    end
-                else
-                    origin, origin_alpha = get_remembered_position(player, tickcount)
-                end
-
-                if origin ~= nil then
-                    local previous = player_info_prev[player]
-                    local old_origin, old_alpha, old_hittable, old_stable_ticks = nil, nil, nil, 0
-                    if previous ~= nil then
-                        old_origin, old_alpha, old_hittable, old_stable_ticks = unpack(previous)
-                    end
-
-                    -- update check
-                    local dormant_accurate = origin_alpha == nil or origin_alpha >= MIN_DORMANT_ALPHA
-
-                    if dormant_accurate then
-                        local target, dmg = scan_estimated_points(lp, eyepos, origin, ui_get(menu.dormant_mindmg))
-                        local stable_ticks = is_origin_stable(origin, old_origin, origin_alpha or 1, old_alpha or 1) and ((old_stable_ticks or 0) + 1) or 0
-                        if stable_ticks > 6 then
-                            stable_ticks = 6
-                        end
-
-                        can_hit = target ~= nil and stable_ticks > 0
-                        if can_shoot and can_hit and ui_get(menu.dormant_key) then
-                            local pitch, yaw = eyepos:to(target):angles()
-                            local max_speed = scoped and weapon.max_player_speed_alt or weapon.max_player_speed
-                            if max_speed ~= nil then
-                                modify_velocity(cmd, max_speed * 0.33)
-                            end
-
-                            -- autoscope
-                            if not scoped and weapon.type == "sniperrifle" and cmd.in_jump == 0 and onground == 1 then
-                                cmd.in_attack2 = 1
-                            end
-                            
-                            local waiting_for_scope = weapon.type == "sniperrifle" and not scoped
-                            if not waiting_for_scope and inaccuracy < get_accuracy_limit(weapon) and cmd.chokedcommands == 0 then
-                                cmd.pitch = pitch
-                                cmd.yaw = yaw
-                                cmd.in_attack = 1
-
-                                -- dont shoot again
-                                can_shoot = false
-                            end
-                        end
-                    end
-
-                    local stable_ticks = is_origin_stable(origin, old_origin, origin_alpha or 1, old_alpha or 1) and ((old_stable_ticks or 0) + 1) or 0
-                    if stable_ticks > 6 then
-                        stable_ticks = 6
-                    end
-
-                    player_info[player] = {origin, origin_alpha or 1, can_hit, stable_ticks}
-                end
-            end
-        end
-        ::skip::
-    end
-    player_info_prev = player_info
-end
-
-client.register_esp_flag("DA", 255, 255, 255, function(player)
-    if ui.get(menu.dormant_switch) and entity.is_enemy(player) and player_info_prev[player] ~= nil and entity.is_alive(entity_get_local_player()) then
-        local _, _, can_hit = unpack(player_info_prev[player])
-
-        return can_hit
-    end
-end)
-local function painter()
-    if not entity_is_alive(entity_get_local_player()) then return end -- dont draw if dead :lowiqq:
-    if ui_get(menu.dormant_switch) and ui_get(menu.dormant_key) and ui_get(menu.dormant_indicator) then
-        local colors = {132,196,20,245}
-        for k, v in pairs(player_info_prev) do
-            if k ~= nil then
-                if v[3] == true then
-                    colors = {252,222,30,245}
-                    break
-                end
-            end
-        end
-        renderer_indicator(colors[1],colors[2],colors[3],colors[4], "DA")
-    end
-end
-local function resetter()
-    local freezetime = (cvar.mp_freezetime:get_float()+1) / globals.tickinterval() -- get freezetime plus 1 second and disable dormantbob for that amount of ticks
-    roundStarted = globals_tickcount() + freezetime
-    player_info_prev = {}
-    position_memory = {}
-    real_position_memory = {}
-end
-
-local function update_state()
-    local czechbox = ui_get(menu.dormant_switch)
-
-    if czechbox then
-        if dormant_esp_restore == nil then
-            dormant_esp_restore = ui_get(ref.dormantEsp)
-        end
-
-        ui.set(ref.dormantEsp, true)
-
-        if not callbacks_registered then
-            client.set_event_callback("setup_command", on_setup_command)
-            client.set_event_callback("paint", painter)
-            client.set_event_callback("round_prestart", resetter)
-            callbacks_registered = true
-        end
-    elseif dormant_esp_restore ~= nil then
-        ui.set(ref.dormantEsp, dormant_esp_restore)
-        dormant_esp_restore = nil
-        player_info_prev = {}
-    end
-
-    if not czechbox and callbacks_registered then
-        client.unset_event_callback("setup_command", on_setup_command)
-        client.unset_event_callback("paint", painter)
-        client.unset_event_callback("round_prestart", resetter)
-        callbacks_registered = false
-    end
-
-end
-
-_G.pasthetic_dormant = {
-    refs = menu,
-    update_state = update_state
-}
-_G.aesthetic_dormant = _G.pasthetic_dormant
-
-ui_set_callback(menu.dormant_switch, update_state)
-update_state()
-ui.set(menu.dormant_indicator, true)
-
-client.set_event_callback("shutdown", function()
-    if callbacks_registered then
-        client.unset_event_callback("setup_command", on_setup_command)
-        client.unset_event_callback("paint", painter)
-        client.unset_event_callback("round_prestart", resetter)
-        callbacks_registered = false
-    end
-
-    if dormant_esp_restore ~= nil then
-        ui.set(ref.dormantEsp, dormant_esp_restore)
-        dormant_esp_restore = nil
-    end
-end)
-]],
-    ["pasthetic/clantag"] = [[local M = {}
-
-function M.start(deps)
-    local resource = assert(deps.resource, 'clantag: resource dependency is required')
-    local client = assert(deps.client, 'clantag: client dependency is required')
-    local globals = assert(deps.globals, 'clantag: globals dependency is required')
-    local utils = assert(deps.utils, 'clantag: utils dependency is required')
-
-    local ref = resource.main.miscellaneous.clantag
-    local last_tag = nil
-    local last_index = nil
-    local frame_time = 0.25
-
-    if type(client.set_clan_tag) ~= 'function' then
-        return
-    end
-
-    local frames = {
-        '[---------]',
-        '[p--------]',
-        '[pa-------]',
-        '[pas------]',
-        '[past-----]',
-        '[pasth----]',
-        '[pasthe---]',
-        '[pasthet--]',
-        '[pastheti-]',
-        '[pasthetic]',
-        '[p4sthetic]',
-        '[p4$thetic]',
-        '[p4$7hetic]',
-        '[p4$7he7ic]',
-        '[p4$7he71c]',
-        '[pa$7he71c]',
-        '[pas7he71c]',
-        '[pasthe71c]',
-        '[pasthet1c]',
-        '[pasthetic]',
-        '[pastheti<]',
-        '[pasthet<c]',
-        '[pasthe<ic]',
-        '[pasth<tic]',
-        '[past<etic]',
-        '[pas<hetic]',
-        '[pa<thetic]',
-        '[p<sthetic]',
-        '[<asthetic]',
-        '[pasthetic]',
-        '[pastheti-]',
-        '[pasthet--]',
-        '[pasthe---]',
-        '[pasth----]',
-        '[past-----]',
-        '[pas------]',
-        '[pa-------]',
-        '[p--------]',
-        '[---------]'
-    }
-
-    local function set_tag(tag)
-        if tag == last_tag then
-            return
-        end
-
-        client.set_clan_tag(tag)
-        last_tag = tag
-    end
-
-    local function get_synced_time()
-        if type(globals.tickcount) == 'function' and type(globals.tickinterval) == 'function' then
-            return globals.tickcount() * globals.tickinterval()
-        end
-
-        if type(globals.curtime) == 'function' then
-            return globals.curtime()
-        end
-
-        return globals.realtime()
-    end
-
-    local function get_frame()
-        local index = math.floor(get_synced_time() / frame_time) % #frames + 1
-
-        return frames[index], index
-    end
-
-    local function reset()
-        last_tag = nil
-        last_index = nil
-        client.set_clan_tag('')
-    end
-
-    local function on_paint()
-        if not ref.enabled:get() then
-            if last_tag ~= nil then
-                reset()
-            end
-            return
-        end
-
-        local tag, index = get_frame()
-        if index == last_index then
-            return
-        end
-
-        last_index = index
-        set_tag(tag)
-    end
-
-    local function on_enabled(item)
-        local enabled = item:get()
-
-        if not enabled then
-            reset()
-        end
-
-        utils.event_callback('shutdown', reset, enabled)
-    end
-
-    utils.event_callback('paint', on_paint, true)
-    ref.enabled:set_callback(on_enabled, true)
-end
-
-return M
-]],
+return M]=],
     ["pasthetic/config_controller"] = [[local M = {}
 
 function M.start(deps)
@@ -9009,6 +8319,464 @@ end
 
 return M
 ]],
+    ["pasthetic/dormant"] = [[local M = {}
+local started = false
+
+function M.start()
+    if started then
+        return rawget(_G, 'pasthetic_dormant')
+    end
+
+    started = true
+-- local variables for API functions. any changes to the line below will be lost on re-generation
+local client_visible, client_eye_position, client_log, client_trace_bullet, entity_get_bounding_box, entity_get_local_player, entity_get_origin, entity_get_player_name, entity_get_player_resource, entity_get_player_weapon, entity_get_prop, entity_is_dormant, entity_is_enemy, globals_curtime, globals_maxplayers, globals_tickcount, math_max, renderer_indicator, string_format, ui_get, ui_new_checkbox, ui_new_hotkey, ui_reference, ui_set_callback, sqrt, unpack, entity_is_alive, plist_get = client.visible, client.eye_position, client.log, client.trace_bullet, entity.get_bounding_box, entity.get_local_player, entity.get_origin, entity.get_player_name, entity.get_player_resource, entity.get_player_weapon, entity.get_prop, entity.is_dormant, entity.is_enemy, globals.curtime, globals.maxplayers, globals.tickcount, math.max, renderer.indicator, string.format, ui.get, ui.new_checkbox, ui.new_hotkey, ui.reference, ui.set_callback, sqrt, unpack, entity.is_alive, plist.get
+
+local ffi = require "ffi"
+local vector = require "vector"
+local weapons = require "gamesense/csgo_weapons"
+
+local native_GetClientEntity = vtable_bind("client_panorama.dll", "VClientEntityList003", 3, "void*(__thiscall*)(void*,int)")
+local native_IsWeapon = vtable_thunk(165, "bool(__thiscall*)(void*)")
+local native_GetInaccuracy = vtable_thunk(482, "float(__thiscall*)(void*)")
+
+
+local ref = {
+    mindmg = ui_reference("RAGE", "Aimbot", "Minimum damage"),
+    dormantEsp = ui_reference("VISUALS", "Player ESP", "Dormant"),
+}
+
+local menu = {
+    dormant_switch = ui_new_checkbox("AA", "Anti-aimbot angles", "Dormant aimbot"),
+    dormant_key = ui_new_hotkey("AA", "Anti-aimbot angles", "Dormant aimbot", true),
+    dormant_mindmg = ui.new_slider("AA", "Anti-aimbot angles", "Dormant minimum damage", 0, 100, 10, true),
+    dormant_indicator = ui_new_checkbox("AA", "Anti-aimbot angles", "Dormant indicator"),
+}
+
+local player_info_prev = {}
+local position_memory = {}
+local real_position_memory = {}
+local roundStarted = 0
+local dormant_esp_restore = nil
+local callbacks_registered = false
+local MAX_DORMANT_CACHE_TICKS = 128
+local MAX_DORMANT_REAL_DISTANCE_SQR = 650 * 650
+local MAX_DORMANT_REAL_Z_DELTA = 160
+local MIN_DORMANT_ALPHA = 0.18
+local MIN_DORMANT_ORIGIN_LENGTH_SQR = 64 * 64
+
+local function modify_velocity(e, goalspeed)
+    local minspeed = math.sqrt((e.forwardmove * e.forwardmove) + (e.sidemove * e.sidemove))
+    if goalspeed <= 0 or minspeed <= 0 then
+        return
+    end
+
+    if e.in_duck == 1 then
+        goalspeed = goalspeed * 2.94117647
+    end
+
+    if minspeed <= goalspeed then
+        return
+    end
+
+    local speedfactor = goalspeed / minspeed
+    e.forwardmove = e.forwardmove * speedfactor
+    e.sidemove = e.sidemove * speedfactor
+end
+
+local estimated_points = {
+    { name = "stomach", z = 40, weight = 1.00, bonus_damage = 0 },
+    { name = "chest", z = 52, weight = 0.82, bonus_damage = 0 },
+    { name = "pelvis", z = 30, weight = 0.72, bonus_damage = 0 },
+    { name = "head", z = 62, weight = 0.35, bonus_damage = 5 },
+}
+
+local function scan_estimated_points(lp, eyepos, origin, mindmg)
+    local best_point, best_damage, best_name
+    local best_score = -1
+
+    for i = 1, #estimated_points do
+        local data = estimated_points[i]
+        local point = origin + vector(0, 0, data.z)
+        local _, damage = client_trace_bullet(lp, eyepos.x, eyepos.y, eyepos.z, point.x, point.y, point.z, true)
+        damage = damage or 0
+
+        local hidden = not client_visible(point.x, point.y, point.z)
+        if damage > (mindmg + data.bonus_damage) and hidden then
+            local score = damage * data.weight
+            if score > best_score then
+                best_score = score
+                best_point = point
+                best_damage = damage
+                best_name = data.name
+            end
+        end
+    end
+
+    return best_point, best_damage, best_name
+end
+
+local function is_origin_stable(origin, old_origin, alpha, old_alpha)
+    if old_origin == nil or old_alpha == nil then
+        return false
+    end
+
+    local dx = origin.x - old_origin.x
+    local dy = origin.y - old_origin.y
+    local dz = origin.z - old_origin.z
+
+    return (dx * dx + dy * dy + dz * dz) <= 64 and alpha > 0.795 and old_alpha > 0.75
+end
+
+local function get_accuracy_limit(weapon)
+    if weapon.type == "sniperrifle" then
+        return 0.009
+    end
+
+    if weapon.is_revolver then
+        return 0.0065
+    end
+
+    if weapon.type == "pistol" then
+        return 0.0075
+    end
+
+    return 0.009
+end
+
+local function is_valid_origin(x, y, z)
+    if x == nil or y == nil or z == nil then
+        return false
+    end
+
+    if x ~= x or y ~= y or z ~= z then
+        return false
+    end
+
+    if math.abs(x) > 32768 or math.abs(y) > 32768 or z < -4096 or z > 8192 then
+        return false
+    end
+
+    return (x * x + y * y + z * z) > MIN_DORMANT_ORIGIN_LENGTH_SQR
+end
+
+local function is_valid_dormant_box(x1, y1, x2, y2, alpha)
+    if x1 == nil or y1 == nil or x2 == nil or y2 == nil or alpha == nil then
+        return false
+    end
+
+    if alpha < MIN_DORMANT_ALPHA or alpha > 1.05 then
+        return false
+    end
+
+    return x2 > x1 and y2 > y1
+end
+
+local function remember_real_position(player, origin)
+    real_position_memory[player] = origin
+end
+
+local function forget_position(player)
+    position_memory[player] = nil
+end
+
+local function is_plausible_from_real_position(player, origin)
+    local cached = real_position_memory[player]
+
+    if cached == nil or origin == nil then
+        return false
+    end
+
+    local dx = origin.x - cached.x
+    local dy = origin.y - cached.y
+    local dz = origin.z - cached.z
+
+    return math.abs(dz) <= MAX_DORMANT_REAL_Z_DELTA and (dx * dx + dy * dy + dz * dz) <= MAX_DORMANT_REAL_DISTANCE_SQR
+end
+
+local function remember_position(player, origin, tickcount, alpha)
+    position_memory[player] = {
+        origin = origin,
+        tick = tickcount,
+        alpha = alpha or 1
+    }
+end
+
+local function get_remembered_position(player, tickcount)
+    local cached = position_memory[player]
+    if cached == nil then
+        return nil
+    end
+
+    if tickcount - cached.tick > MAX_DORMANT_CACHE_TICKS then
+        return nil
+    end
+
+    return cached.origin, cached.alpha
+end
+
+local function get_weapon_pointer(lp, weapon_index)
+    local weapon_handle = entity_get_prop(lp, "m_hActiveWeapon")
+    local weapon_ptr = weapon_handle ~= nil and native_GetClientEntity(bit.band(weapon_handle, 0xFFF)) or nil
+
+    if weapon_ptr ~= nil and native_IsWeapon(weapon_ptr) then
+        return weapon_ptr
+    end
+
+    weapon_ptr = weapon_index ~= nil and native_GetClientEntity(weapon_index) or nil
+    if weapon_ptr ~= nil and native_IsWeapon(weapon_ptr) then
+        return weapon_ptr
+    end
+
+    return nil
+end
+
+local function on_setup_command(cmd)
+    if not ui_get(menu.dormant_switch) then
+        return
+    end
+
+    local lp = entity_get_local_player()
+    if lp == nil or not entity_is_alive(lp) then
+        player_info_prev = {}
+        position_memory = {}
+        real_position_memory = {}
+        return
+    end
+
+    local my_weapon = entity_get_player_weapon(lp)
+    if not my_weapon then
+        return
+    end
+
+    local ent = get_weapon_pointer(lp, my_weapon)
+    local inaccuracy = 0
+    if ent ~= nil and native_IsWeapon(ent) then
+        inaccuracy = native_GetInaccuracy(ent) or 0
+    else
+        inaccuracy = entity_get_prop(my_weapon, "m_fAccuracyPenalty") or 0
+    end
+
+    local tickcount = globals_tickcount()
+    local player_resource = entity_get_player_resource()
+    if player_resource == nil then
+        return
+    end
+
+    local eye_x, eye_y, eye_z = client_eye_position()
+    if eye_x == nil then
+        return
+    end
+
+    local eyepos = vector(eye_x, eye_y, eye_z)
+    local simtime = entity_get_prop(lp, "m_flSimulationTime") or globals_curtime()
+    local weapon = weapons(my_weapon)
+    if weapon == nil then
+        return
+    end
+
+    local scoped = entity_get_prop(lp, "m_bIsScoped") == 1
+    local flags = entity_get_prop(lp, 'm_fFlags') or 0
+    local onground = bit.band(flags, bit.lshift(1, 0))
+    if tickcount < roundStarted then return end -- to prevent shooting at ghost dormant esp @ the beginning of round
+
+    local can_shoot
+    if weapon.is_revolver then -- for some reason can_shoot returns always false with r8 despite all 3 props being true, no idea why
+        can_shoot = simtime > (entity_get_prop(my_weapon, "m_flNextPrimaryAttack") or math.huge) -- doing this fixes it ><
+    elseif weapon.is_melee_weapon then
+        can_shoot = false
+    else
+        can_shoot = simtime > math_max(
+            entity_get_prop(lp, "m_flNextAttack") or math.huge,
+            entity_get_prop(my_weapon, "m_flNextPrimaryAttack") or math.huge,
+            entity_get_prop(my_weapon, "m_flNextSecondaryAttack") or 0
+        )
+    end
+
+    -- new player info
+    local player_info = {}
+
+    -- loop through all players and continue if they're connected
+    for player=1, globals_maxplayers() do
+        if entity_get_prop(player_resource, "m_bConnected", player) == 1 then
+            if plist_get(player, "Add to whitelist") then goto skip end
+            if entity_is_enemy(player) and entity_is_alive(player) then
+                local can_hit
+
+                local origin_x, origin_y, origin_z = entity_get_origin(player)
+                local x1, y1, x2, y2, alpha_multiplier = entity_get_bounding_box(player) -- grab alpha of the dormant esp
+                local has_dormant_snapshot = origin_x ~= nil or origin_y ~= nil or origin_z ~= nil or alpha_multiplier ~= nil
+                local current_origin = is_valid_origin(origin_x, origin_y, origin_z) and vector(origin_x, origin_y, origin_z) or nil
+
+                if not entity_is_dormant(player) then
+                    if current_origin ~= nil then
+                        remember_position(player, current_origin, tickcount, 1)
+                        remember_real_position(player, current_origin)
+                        player_info[player] = {current_origin, 1, false, 0}
+                    end
+                    goto skip
+                end
+
+                local origin = nil
+                local origin_alpha = alpha_multiplier
+                if has_dormant_snapshot then
+                    if current_origin ~= nil
+                        and is_valid_dormant_box(x1, y1, x2, y2, alpha_multiplier)
+                        and is_plausible_from_real_position(player, current_origin)
+                    then
+                        origin = current_origin
+                        remember_position(player, origin, tickcount, alpha_multiplier)
+                    else
+                        forget_position(player)
+                    end
+                else
+                    origin, origin_alpha = get_remembered_position(player, tickcount)
+                end
+
+                if origin ~= nil then
+                    local previous = player_info_prev[player]
+                    local old_origin, old_alpha, old_hittable, old_stable_ticks = nil, nil, nil, 0
+                    if previous ~= nil then
+                        old_origin, old_alpha, old_hittable, old_stable_ticks = unpack(previous)
+                    end
+
+                    -- update check
+                    local dormant_accurate = origin_alpha == nil or origin_alpha >= MIN_DORMANT_ALPHA
+
+                    if dormant_accurate then
+                        local target, dmg = scan_estimated_points(lp, eyepos, origin, ui_get(menu.dormant_mindmg))
+                        local stable_ticks = is_origin_stable(origin, old_origin, origin_alpha or 1, old_alpha or 1) and ((old_stable_ticks or 0) + 1) or 0
+                        if stable_ticks > 6 then
+                            stable_ticks = 6
+                        end
+
+                        can_hit = target ~= nil and stable_ticks > 0
+                        if can_shoot and can_hit and ui_get(menu.dormant_key) then
+                            local pitch, yaw = eyepos:to(target):angles()
+                            local max_speed = scoped and weapon.max_player_speed_alt or weapon.max_player_speed
+                            if max_speed ~= nil then
+                                modify_velocity(cmd, max_speed * 0.33)
+                            end
+
+                            -- autoscope
+                            if not scoped and weapon.type == "sniperrifle" and cmd.in_jump == 0 and onground == 1 then
+                                cmd.in_attack2 = 1
+                            end
+                            
+                            local waiting_for_scope = weapon.type == "sniperrifle" and not scoped
+                            if not waiting_for_scope and inaccuracy < get_accuracy_limit(weapon) and cmd.chokedcommands == 0 then
+                                cmd.pitch = pitch
+                                cmd.yaw = yaw
+                                cmd.in_attack = 1
+
+                                -- dont shoot again
+                                can_shoot = false
+                            end
+                        end
+                    end
+
+                    local stable_ticks = is_origin_stable(origin, old_origin, origin_alpha or 1, old_alpha or 1) and ((old_stable_ticks or 0) + 1) or 0
+                    if stable_ticks > 6 then
+                        stable_ticks = 6
+                    end
+
+                    player_info[player] = {origin, origin_alpha or 1, can_hit, stable_ticks}
+                end
+            end
+        end
+        ::skip::
+    end
+    player_info_prev = player_info
+end
+
+client.register_esp_flag("DA", 255, 255, 255, function(player)
+    if ui.get(menu.dormant_switch) and entity.is_enemy(player) and player_info_prev[player] ~= nil and entity.is_alive(entity_get_local_player()) then
+        local _, _, can_hit = unpack(player_info_prev[player])
+
+        return can_hit
+    end
+end)
+local function painter()
+    if not entity_is_alive(entity_get_local_player()) then return end -- dont draw if dead :lowiqq:
+    if ui_get(menu.dormant_switch) and ui_get(menu.dormant_key) and ui_get(menu.dormant_indicator) then
+        local colors = {132,196,20,245}
+        for k, v in pairs(player_info_prev) do
+            if k ~= nil then
+                if v[3] == true then
+                    colors = {252,222,30,245}
+                    break
+                end
+            end
+        end
+        renderer_indicator(colors[1],colors[2],colors[3],colors[4], "DA")
+    end
+end
+local function resetter()
+    local freezetime = (cvar.mp_freezetime:get_float()+1) / globals.tickinterval() -- get freezetime plus 1 second and disable dormantbob for that amount of ticks
+    roundStarted = globals_tickcount() + freezetime
+    player_info_prev = {}
+    position_memory = {}
+    real_position_memory = {}
+end
+
+local function update_state()
+    local czechbox = ui_get(menu.dormant_switch)
+
+    if czechbox then
+        if dormant_esp_restore == nil then
+            dormant_esp_restore = ui_get(ref.dormantEsp)
+        end
+
+        ui.set(ref.dormantEsp, true)
+
+        if not callbacks_registered then
+            client.set_event_callback("setup_command", on_setup_command)
+            client.set_event_callback("paint", painter)
+            client.set_event_callback("round_prestart", resetter)
+            callbacks_registered = true
+        end
+    elseif dormant_esp_restore ~= nil then
+        ui.set(ref.dormantEsp, dormant_esp_restore)
+        dormant_esp_restore = nil
+        player_info_prev = {}
+    end
+
+    if not czechbox and callbacks_registered then
+        client.unset_event_callback("setup_command", on_setup_command)
+        client.unset_event_callback("paint", painter)
+        client.unset_event_callback("round_prestart", resetter)
+        callbacks_registered = false
+    end
+
+end
+
+_G.pasthetic_dormant = {
+    refs = menu,
+    update_state = update_state
+}
+_G.aesthetic_dormant = _G.pasthetic_dormant
+
+ui_set_callback(menu.dormant_switch, update_state)
+update_state()
+ui.set(menu.dormant_indicator, true)
+
+client.set_event_callback("shutdown", function()
+    if callbacks_registered then
+        client.unset_event_callback("setup_command", on_setup_command)
+        client.unset_event_callback("paint", painter)
+        client.unset_event_callback("round_prestart", resetter)
+        callbacks_registered = false
+    end
+
+    if dormant_esp_restore ~= nil then
+        ui.set(ref.dormantEsp, dormant_esp_restore)
+        dormant_esp_restore = nil
+    end
+end)
+
+    return rawget(_G, 'pasthetic_dormant')
+end
+
+return M]],
     ["pasthetic/engine_interfaces"] = [=[local M = {}
 
 function M.new_globalvars(deps)
@@ -9516,14 +9284,16 @@ function M.wrap(deps, ref, on_fire)
     return item
 end
 
-function M.register_bundled_dormant(deps)
+function M.register_dormant(deps)
     local ui = assert(deps.ui, 'external_config_ref: ui dependency is required')
     local config_system = assert(deps.config_system, 'external_config_ref: config_system dependency is required')
     local menu_logic = assert(deps.menu_logic, 'external_config_ref: menu_logic dependency is required')
     local menu = assert(deps.menu, 'external_config_ref: menu dependency is required')
     local globals_table = deps.globals_table or _G
 
-    local dormant_api = rawget(globals_table, 'pasthetic_dormant') or rawget(globals_table, 'aesthetic_dormant')
+    local dormant_api = deps.dormant_api
+        or rawget(globals_table, 'pasthetic_dormant')
+        or rawget(globals_table, 'aesthetic_dormant')
 
     if type(dormant_api) ~= 'table' or type(dormant_api.refs) ~= 'table' then
         return nil
@@ -12652,6 +12422,12 @@ function M.start(deps)
     local trace = deps.trace or require 'gamesense/trace'
     local weapons = deps.csgo_weapons or require 'gamesense/csgo_weapons'
     local bit = deps.bit or bit
+    local require_module = deps.require_module or require
+
+    local helpers_module = require_module 'pasthetic/rage_ai_peek_helpers'
+    local records_module = require_module 'pasthetic/rage_ai_peek_records'
+    local positions_module = require_module 'pasthetic/rage_ai_peek_positions'
+    local scanner_module = require_module 'pasthetic/rage_ai_peek_scanner'
 
     local ref = resource.main.ragebot.ai_peek
     local rage_min_damage = { ui.reference('Rage', 'Aimbot', 'Minimum damage') }
@@ -12659,47 +12435,423 @@ function M.start(deps)
     local ref_quick_peek = { ui.reference('Rage', 'Other', 'Quick peek assist') }
     local ref_target_selection = ui.reference('Rage', 'Aimbot', 'Target selection')
 
-    local hitbox_names = {
-        'Head',
-        'Neck',
-        'Pelvis',
-        'Stomach',
-        'Lower chest',
-        'Chest',
-        'Upper chest',
-        'Left thigh',
-        'Right thigh',
-        'Left calf',
-        'Right calf',
-        'Left foot',
-        'Right foot',
-        'Left hand',
-        'Right hand',
-        'Left upper arm',
-        'Left forearm',
-        'Right upper arm',
-        'Right forearm'
+    local constants = {
+        SERVER_TELEPORT_DISTANCE = 64,
+        STALL_UPDATES_MIN = 2,
+        STALL_SPEED_MIN = 36,
+        ROLLBACK_HOLD_TICKS = 12,
+        COMMIT_EXPOSURE_DAMAGE = 5,
+        COMMIT_LOCK_TICKS = 6,
+        COMMIT_DISTANCE = 8,
+        SAFE_RESCAN_TICKS = 4,
+        RETURN_RESUME_SPEED = 55,
+        MANUAL_RESET_DISTANCE_MIN = 160,
+        AI_PEEK_TARGET_SELECTION = 'Best hit chance',
+        hitbox_names = {
+            'Head',
+            'Neck',
+            'Pelvis',
+            'Stomach',
+            'Lower chest',
+            'Chest',
+            'Upper chest',
+            'Left thigh',
+            'Right thigh',
+            'Left calf',
+            'Right calf',
+            'Left foot',
+            'Right foot',
+            'Left hand',
+            'Right hand',
+            'Left upper arm',
+            'Left forearm',
+            'Right upper arm',
+            'Right forearm'
+        }
     }
+    constants.SERVER_TELEPORT_DISTANCE_SQR = constants.SERVER_TELEPORT_DISTANCE * constants.SERVER_TELEPORT_DISTANCE
+
+    local helpers = helpers_module.new({
+        ui = ui,
+        entity = entity,
+        client = client,
+        vector = vector,
+        globals = globals,
+        renderer = renderer,
+        utils = utils,
+        bit = bit
+    })
+    local records = records_module.new({
+        entity = entity,
+        globals = globals,
+        helpers = helpers,
+        constants = constants
+    })
+    local positions = positions_module.new({
+        entity = entity,
+        client = client,
+        vector = vector,
+        trace = trace,
+        ref = ref,
+        helpers = helpers
+    })
+    local scanner = scanner_module.new({
+        ui = ui,
+        entity = entity,
+        client = client,
+        vector = vector,
+        ref = ref,
+        helpers = helpers,
+        records = records,
+        constants = constants,
+        rage_min_damage = rage_min_damage,
+        rage_damage_override = rage_damage_override
+    })
 
     local aipeek = {
         data = nil
     }
-    local records = {}
 
-    local SERVER_TELEPORT_DISTANCE = 64
-    local SERVER_TELEPORT_DISTANCE_SQR = SERVER_TELEPORT_DISTANCE * SERVER_TELEPORT_DISTANCE
-    local STALL_UPDATES_MIN = 2
-    local STALL_SPEED_MIN = 36
-    local ROLLBACK_HOLD_TICKS = 12
-    local COMMIT_EXPOSURE_DAMAGE = 5
-    local COMMIT_LOCK_TICKS = 6
-    local COMMIT_DISTANCE = 8
-    local SAFE_RESCAN_TICKS = 4
-    local RETURN_RESUME_SPEED = 55
-    local MANUAL_RESET_DISTANCE_MIN = 160
-    local AI_PEEK_TARGET_SELECTION = 'Best hit chance'
+    local function clear_commit()
+        if aipeek.data ~= nil then
+            aipeek.data.commit = nil
+        end
+    end
 
-    local function safe_get(item, fallback)
+    local function set_target_selection_override()
+        if aipeek.data == nil or ref_target_selection == nil then
+            return
+        end
+
+        if aipeek.data.target_selection_before == nil then
+            aipeek.data.target_selection_before = helpers.safe_get(ref_target_selection, nil)
+        end
+
+        pcall(ui.set, ref_target_selection, constants.AI_PEEK_TARGET_SELECTION)
+    end
+
+    local function restore_target_selection()
+        if aipeek.data == nil or aipeek.data.target_selection_before == nil or ref_target_selection == nil then
+            return
+        end
+
+        pcall(ui.set, ref_target_selection, aipeek.data.target_selection_before)
+        aipeek.data.target_selection_before = nil
+    end
+
+    local function start_native_return()
+        if aipeek.data == nil then
+            return
+        end
+
+        aipeek.data.native_return = true
+        aipeek.data.safe_rescan_ticks = 0
+        clear_commit()
+        restore_target_selection()
+    end
+
+    local function ready_shot_local()
+        local me = entity.get_local_player()
+
+        if me == nil or not entity.is_alive(me) then
+            return false
+        end
+
+        local weapon_index = entity.get_player_weapon(me)
+        local weapon = weapons(weapon_index)
+
+        if weapon == nil or weapon.weapon_type_int == 0 or weapon.weapon_type_int == 9 then
+            return false
+        end
+
+        local next_attack = entity.get_prop(me, 'm_flNextAttack') or 0
+        local next_weapon_attack = entity.get_prop(weapon_index, 'm_flNextPrimaryAttack') or 0
+        local now = globals.curtime()
+
+        return next_attack <= now and next_weapon_attack <= now
+    end
+
+    local function reset()
+        restore_target_selection()
+        aipeek.data = nil
+        records.reset()
+    end
+
+    local function is_active()
+        return ref.enabled:get()
+            and helpers.safe_get(ref_quick_peek[1], false) == true
+            and helpers.safe_get(ref_quick_peek[2], false) == true
+    end
+
+    local function update_data()
+        local bind_active = is_active()
+
+        if not bind_active then
+            reset()
+            return
+        end
+
+        local me = entity.get_local_player()
+
+        if me == nil or not entity.is_alive(me) then
+            reset()
+            return
+        end
+
+        if aipeek.data == nil then
+            aipeek.data = {}
+        end
+
+        if aipeek.data.stored == nil then
+            aipeek.data.stored = {}
+        end
+
+        if aipeek.data.stored.pos ~= true then
+            local position = helpers.get_origin(me)
+            local eye = helpers.make_vec(client.eye_position())
+
+            if position == nil or eye == nil then
+                return
+            end
+
+            aipeek.data.positions = {
+                center = position,
+                other = {}
+            }
+            aipeek.data.eye = eye
+        end
+
+        if aipeek.data.stored.ang ~= true then
+            positions.build(aipeek.data)
+        end
+
+        aipeek.data.stored = {
+            pos = true,
+            ang = true
+        }
+
+        if ref.live_scan:get() then
+            aipeek.data.stored.ang = false
+        end
+    end
+
+    local function sort_aim_entries()
+        table.sort(aipeek.data.aim, function(a, b)
+            if a.bad_record_exposure ~= b.bad_record_exposure then
+                return (a.bad_record_exposure or 0) < (b.bad_record_exposure or 0)
+            end
+
+            if a.exposure_count ~= b.exposure_count then
+                return (a.exposure_count or 0) < (b.exposure_count or 0)
+            end
+
+            if a.incoming_damage ~= b.incoming_damage then
+                return (a.incoming_damage or 0) < (b.incoming_damage or 0)
+            end
+
+            if a.lethal ~= b.lethal then
+                return a.lethal == true
+            end
+
+            if a.move_distance ~= b.move_distance then
+                return (a.move_distance or 0) < (b.move_distance or 0)
+            end
+
+            if a.damage ~= b.damage then
+                return (a.damage or 0) > (b.damage or 0)
+            end
+
+            return (a.target_distance or a.start:dist(a['end'])) < (b.target_distance or b.start:dist(b['end']))
+        end)
+    end
+
+    local function update_native_return(me, origin)
+        local current_safety = scanner.evaluate_position_safety(me, origin)
+        local stable_speed = helpers.get_speed2d(helpers.get_velocity(me)) <= constants.RETURN_RESUME_SPEED
+
+        if scanner.is_full_safe(current_safety) and stable_speed then
+            aipeek.data.safe_rescan_ticks = (aipeek.data.safe_rescan_ticks or 0) + 1
+        else
+            aipeek.data.safe_rescan_ticks = 0
+        end
+
+        if (aipeek.data.safe_rescan_ticks or 0) >= constants.SAFE_RESCAN_TICKS then
+            aipeek.data.native_return = false
+            aipeek.data.safe_rescan_ticks = 0
+            clear_commit()
+            restore_target_selection()
+        end
+    end
+
+    local function get_move_target(me, origin, center_distance, tickcount)
+        local active_commit = aipeek.data.commit
+
+        if active_commit ~= nil and active_commit.until_tick < tickcount then
+            if center_distance > constants.COMMIT_DISTANCE then
+                start_native_return()
+                return nil
+            end
+
+            clear_commit()
+        end
+
+        if not ready_shot_local() then
+            aipeek.data.safe_rescan_ticks = 0
+
+            if center_distance > constants.COMMIT_DISTANCE then
+                start_native_return()
+                return nil
+            end
+
+            clear_commit()
+            return nil
+        end
+
+        set_target_selection_override()
+        scanner.scan(aipeek.data, me, origin)
+        sort_aim_entries()
+
+        local best_aim = aipeek.data.aim[1]
+        local current_safety = center_distance > constants.COMMIT_DISTANCE
+            and scanner.evaluate_position_safety(me, origin)
+            or nil
+        local commit_point = scanner.is_position_hittable(current_safety)
+
+        if commit_point then
+            local commit = aipeek.data.commit
+
+            if commit ~= nil and commit.until_tick >= tickcount then
+                return commit.position
+            end
+
+            if scanner.is_commit_candidate_safe(best_aim, current_safety) then
+                aipeek.data.commit = {
+                    position = helpers.vector_copy(best_aim.start),
+                    until_tick = tickcount + constants.COMMIT_LOCK_TICKS
+                }
+                return best_aim.start
+            end
+
+            start_native_return()
+            return nil
+        end
+
+        if best_aim ~= nil and best_aim.start ~= nil then
+            clear_commit()
+            return best_aim.start
+        end
+
+        clear_commit()
+        return nil
+    end
+
+    local function on_setup_command(cmd)
+        local me = entity.get_local_player()
+
+        if me == nil or not entity.is_alive(me) then
+            return
+        end
+
+        if aipeek.data == nil then
+            return
+        end
+
+        aipeek.data.aim = {}
+
+        local origin = helpers.get_origin(me)
+
+        if origin == nil or aipeek.data.positions == nil then
+            return
+        end
+
+        local is_move = cmd.in_forward == 1
+            or cmd.in_back == 1
+            or cmd.in_moveleft == 1
+            or cmd.in_moveright == 1
+
+        if cmd.in_attack == 1 or cmd.in_attack == true then
+            start_native_return()
+        end
+
+        local center_distance = origin:dist2d(aipeek.data.positions.center)
+        local tickcount = globals.tickcount()
+
+        if not aipeek.data.native_return and aipeek.data.commit == nil then
+            local reset_distance = math.max(ref.distance:get() * 2.25, constants.MANUAL_RESET_DISTANCE_MIN)
+
+            if center_distance > reset_distance then
+                reset()
+                return
+            end
+        end
+
+        if aipeek.data.native_return then
+            update_native_return(me, origin)
+            return
+        end
+
+        local move_to_pos = get_move_target(me, origin, center_distance, tickcount)
+
+        if move_to_pos ~= nil and not is_move then
+            helpers.move_to(cmd, move_to_pos)
+        end
+    end
+
+    local function on_paint()
+        if aipeek.data == nil or aipeek.data.positions == nil or not ref.debug:get() then
+            return
+        end
+
+        for _, point in next, aipeek.data.positions.other do
+            local damage = point[1] ~= nil and point[1].damage or 0
+
+            if damage > 0 then
+                helpers.draw_circle(point.position, 12, 90, 220, 115, 200)
+            else
+                helpers.draw_circle(point.position, 12, 235, 235, 235, 140)
+            end
+        end
+    end
+
+    local function on_aim_fire()
+        if aipeek.data ~= nil then
+            start_native_return()
+        end
+    end
+
+    utils.event_callback('shutdown', reset, true)
+    utils.event_callback('round_start', reset, true)
+    utils.event_callback('level_init', reset, true)
+    utils.event_callback('net_update_end', records.update, true)
+    utils.event_callback('run_command', update_data, true)
+    utils.event_callback('setup_command', on_setup_command, true)
+    utils.event_callback('paint', on_paint, true)
+    utils.event_callback('aim_fire', on_aim_fire, true)
+end
+
+function M.health()
+    return true
+end
+
+return M
+]],
+    ["pasthetic/rage_ai_peek_helpers"] = [[local M = {}
+
+function M.new(deps)
+    deps = deps or {}
+
+    local ui = assert(deps.ui, 'rage_ai_peek_helpers: ui dependency is required')
+    local entity = assert(deps.entity, 'rage_ai_peek_helpers: entity dependency is required')
+    local client = assert(deps.client, 'rage_ai_peek_helpers: client dependency is required')
+    local vector = assert(deps.vector, 'rage_ai_peek_helpers: vector dependency is required')
+    local globals = assert(deps.globals, 'rage_ai_peek_helpers: globals dependency is required')
+    local renderer = deps.renderer
+    local utils = assert(deps.utils, 'rage_ai_peek_helpers: utils dependency is required')
+    local bit = deps.bit or bit
+
+    local helpers = {}
+
+    function helpers.safe_get(item, fallback)
         if item == nil then
             return fallback
         end
@@ -12713,7 +12865,7 @@ function M.start(deps)
         return value
     end
 
-    local function vector_copy(vec)
+    function helpers.vector_copy(vec)
         if vec == nil then
             return nil
         end
@@ -12721,7 +12873,7 @@ function M.start(deps)
         return vector(vec.x, vec.y, vec.z)
     end
 
-    local function make_vec(x, y, z)
+    function helpers.make_vec(x, y, z)
         if x == nil then
             return nil
         end
@@ -12729,22 +12881,22 @@ function M.start(deps)
         return vector(x, y or 0, z or 0)
     end
 
-    local function get_origin(player)
-        return make_vec(entity.get_origin(player))
+    function helpers.get_origin(player)
+        return helpers.make_vec(entity.get_origin(player))
     end
 
-    local function get_velocity(player)
-        return make_vec(entity.get_prop(player, 'm_vecVelocity')) or vector()
+    function helpers.get_velocity(player)
+        return helpers.make_vec(entity.get_prop(player, 'm_vecVelocity')) or vector()
     end
 
-    local function get_eye_position(player)
-        local eye = make_vec(entity.hitbox_position(player, 0))
+    function helpers.get_eye_position(player)
+        local eye = helpers.make_vec(entity.hitbox_position(player, 0))
 
         if eye ~= nil then
             return eye
         end
 
-        local origin = get_origin(player)
+        local origin = helpers.get_origin(player)
 
         if origin == nil then
             return nil
@@ -12753,35 +12905,35 @@ function M.start(deps)
         return origin + vector(0, 0, 64)
     end
 
-    local function get_speed2d(velocity)
+    function helpers.get_speed2d(velocity)
         return math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y)
     end
 
-    local function get_simulation_tick(player)
+    function helpers.get_simulation_tick(player)
         local simulation_time = entity.get_prop(player, 'm_flSimulationTime') or 0
 
         return math.floor(simulation_time / globals.tickinterval() + 0.5)
     end
 
-    local function is_onground(player)
+    function helpers.is_onground(player)
         local flags = entity.get_prop(player, 'm_fFlags') or 0
 
         return bit.band(flags, 1) == 1
     end
 
-    local function clamp01(value)
+    function helpers.clamp01(value)
         return utils.clamp(value, 0, 1)
     end
 
-    local function get_trace_end(tr)
+    function helpers.get_trace_end(tr)
         if tr == nil or tr.end_pos == nil then
             return nil
         end
 
-        return vector_copy(tr.end_pos)
+        return helpers.vector_copy(tr.end_pos)
     end
 
-    local function clamp(min, num, max)
+    function helpers.clamp(min, num, max)
         if min == nil or num == nil or max == nil then
             return false
         end
@@ -12797,9 +12949,195 @@ function M.start(deps)
         return num
     end
 
-    local function extrapolate(pos, vel, ticks)
+    function helpers.extrapolate(pos, vel, ticks)
         return vel * ticks * globals.tickinterval() + pos
     end
+
+    function helpers.move_to(cmd, pos)
+        local me = entity.get_local_player()
+
+        if me == nil or not entity.is_alive(me) or pos == nil then
+            return
+        end
+
+        local origin = helpers.get_origin(me)
+        local angles = vector(client.camera_angles())
+
+        if origin == nil or angles == nil then
+            return
+        end
+
+        local dx = origin.x - pos.x
+        local dy = origin.y - pos.y
+        local yaw = math.rad(angles.y)
+        local forward = helpers.clamp(-450, -20 * (dx * math.cos(yaw) + dy * math.sin(yaw)), 450)
+        local side = helpers.clamp(-450, 20 * (dy * math.cos(yaw) - dx * math.sin(yaw)), 450)
+
+        if forward and side then
+            cmd.forwardmove = forward
+            cmd.sidemove = side
+
+            cmd.in_forward = forward > 1 and 1 or 0
+            cmd.in_back = forward < -1 and 1 or 0
+            cmd.in_moveright = side > 1 and 1 or 0
+            cmd.in_moveleft = side < -1 and 1 or 0
+        end
+    end
+
+    function helpers.draw_circle(pos, radius, r, g, b, a)
+        if renderer == nil or pos == nil then
+            return
+        end
+
+        local old_x, old_y = nil, nil
+
+        for rot = 0, 360, 12 do
+            local rad = math.rad(rot)
+            local x, y = renderer.world_to_screen(
+                pos.x + radius * math.cos(rad),
+                pos.y + radius * math.sin(rad),
+                pos.z
+            )
+
+            if x ~= nil and old_x ~= nil then
+                renderer.line(x, y, old_x, old_y, r, g, b, a)
+            end
+
+            old_x, old_y = x, y
+        end
+    end
+
+    return helpers
+end
+
+return M
+]],
+    ["pasthetic/rage_ai_peek_positions"] = [[local M = {}
+
+function M.new(deps)
+    deps = deps or {}
+
+    local entity = assert(deps.entity, 'rage_ai_peek_positions: entity dependency is required')
+    local client = assert(deps.client, 'rage_ai_peek_positions: client dependency is required')
+    local vector = assert(deps.vector, 'rage_ai_peek_positions: vector dependency is required')
+    local trace = assert(deps.trace, 'rage_ai_peek_positions: trace dependency is required')
+    local ref = assert(deps.ref, 'rage_ai_peek_positions: ref dependency is required')
+    local helpers = assert(deps.helpers, 'rage_ai_peek_positions: helpers dependency is required')
+
+    local api = {}
+
+    function api.build(data)
+        if data == nil or data.positions == nil then
+            return
+        end
+
+        data.positions.other = {}
+
+        local me = entity.get_local_player()
+        local previous = helpers.get_origin(me)
+
+        if previous == nil then
+            return
+        end
+
+        local previous_id = nil
+        local angles = vector(client.camera_angles())
+        local distance = ref.distance:get()
+        local count = ref.count:get()
+        local interval = distance / count
+        local separation = ref.separation:get()
+
+        for side = 1, separation do
+            for dist = interval, distance, interval do
+                local angle = math.rad(angles.y + 90 + (side - 1) * 360 / separation)
+                local x = data.eye.x + dist * math.cos(angle)
+                local y = data.eye.y + dist * math.sin(angle)
+                local lateral = trace.line(
+                    data.eye,
+                    vector(x, y, data.eye.z),
+                    { skip = entity.get_players() }
+                )
+                local lateral_end = helpers.get_trace_end(lateral)
+
+                if lateral_end == nil then
+                    goto continue
+                end
+
+                local down = trace.line(
+                    lateral_end,
+                    lateral_end - vector(0, 0, 96),
+                    { skip = entity.get_players() }
+                )
+                local down_end = helpers.get_trace_end(down)
+                local id = dist .. ':' .. side
+
+                if down_end ~= nil and lateral_end:dist2d(previous) > interval * 0.5 then
+                    if down_end.z - lateral_end.z ~= -96 then
+                        data.positions.other[id] = {
+                            position = down_end,
+                            {
+                                hitbox = {},
+                                damage = 0
+                            },
+                            angle = angle
+                        }
+                    else
+                        local hull = trace.hull(
+                            lateral_end - vector(0, 0, 64),
+                            lateral_end - vector(0, 0, 128),
+                            vector(-16, -16, 0),
+                            vector(16, 16, 72),
+                            { skip = entity.get_players() }
+                        )
+                        local hull_end = helpers.get_trace_end(hull)
+
+                        if hull_end ~= nil and hull_end.z - lateral_end.z ~= -128 then
+                            data.positions.other[id] = {
+                                position = hull_end,
+                                {
+                                    hitbox = {},
+                                    damage = 0
+                                },
+                                angle = angle
+                            }
+                        end
+                    end
+                elseif previous_id ~= nil and previous:dist2d(lateral_end) > interval * 0.25 and down_end ~= nil then
+                    data.positions.other[previous_id] = {
+                        position = down_end,
+                        {
+                            hitbox = {},
+                            damage = 0
+                        },
+                        angle = angle
+                    }
+                end
+
+                previous_id = id
+                previous = lateral_end
+
+                ::continue::
+            end
+        end
+    end
+
+    return api
+end
+
+return M
+]],
+    ["pasthetic/rage_ai_peek_records"] = [[local M = {}
+
+function M.new(deps)
+    deps = deps or {}
+
+    local entity = assert(deps.entity, 'rage_ai_peek_records: entity dependency is required')
+    local globals = assert(deps.globals, 'rage_ai_peek_records: globals dependency is required')
+    local helpers = assert(deps.helpers, 'rage_ai_peek_records: helpers dependency is required')
+    local constants = assert(deps.constants, 'rage_ai_peek_records: constants dependency is required')
+
+    local records = {}
+    local api = {}
 
     local function build_record_context(origin, previous, simulation_tick, tick_delta, speed, airborne, tickcount)
         local origin_delta_sqr = (origin - previous.origin):lengthsqr()
@@ -12811,19 +13149,19 @@ function M.start(deps)
         local rollback = tick_delta < 0
 
         if rollback then
-            stale_updates = math.max(stale_updates, STALL_UPDATES_MIN)
-            rollback_until = tickcount + ROLLBACK_HOLD_TICKS
+            stale_updates = math.max(stale_updates, constants.STALL_UPDATES_MIN)
+            rollback_until = tickcount + constants.ROLLBACK_HOLD_TICKS
         end
 
-        local teleported = origin_delta_sqr > SERVER_TELEPORT_DISTANCE_SQR
+        local teleported = origin_delta_sqr > constants.SERVER_TELEPORT_DISTANCE_SQR
         local stale_threat = tick_delta == 0
-            and stale_updates >= STALL_UPDATES_MIN
-            and (speed > STALL_SPEED_MIN or airborne)
+            and stale_updates >= constants.STALL_UPDATES_MIN
+            and (speed > constants.STALL_SPEED_MIN or airborne)
         local rollback_threat = rollback_until >= tickcount
             and (speed > 12 or airborne or origin_delta > 8)
-        local speed_score = clamp01((speed - 24) / 240)
-        local stale_score = clamp01((stale_updates - 1) / 6)
-        local delta_score = clamp01((origin_delta - 12) / SERVER_TELEPORT_DISTANCE)
+        local speed_score = helpers.clamp01((speed - 24) / 240)
+        local stale_score = helpers.clamp01((stale_updates - 1) / 6)
+        local delta_score = helpers.clamp01((origin_delta - 12) / constants.SERVER_TELEPORT_DISTANCE)
         local confidence = 0
 
         if teleported then
@@ -12840,7 +13178,7 @@ function M.start(deps)
             confidence = math.max(confidence, 0.42 + stale_score * 0.26 + speed_score * 0.20 + (airborne and 0.10 or 0))
         end
 
-        confidence = clamp01(confidence)
+        confidence = helpers.clamp01(confidence)
 
         return {
             confidence = confidence,
@@ -12856,7 +13194,7 @@ function M.start(deps)
         }
     end
 
-    local function update_records()
+    function api.update()
         local tickcount = globals.tickcount()
         local players = entity.get_players(true)
         local seen = {}
@@ -12870,14 +13208,14 @@ function M.start(deps)
                 goto continue
             end
 
-            local origin = get_origin(player)
+            local origin = helpers.get_origin(player)
 
             if origin == nil then
                 records[player] = nil
                 goto continue
             end
 
-            local simulation_tick = get_simulation_tick(player)
+            local simulation_tick = helpers.get_simulation_tick(player)
             local previous = records[player]
             local garbage_until = previous and previous.garbage_until or 0
             local stale_updates = previous and previous.stale_updates or 0
@@ -12886,9 +13224,9 @@ function M.start(deps)
             local defensive_like = false
             local origin_delta = 0
             local tick_delta = 0
-            local velocity = get_velocity(player)
-            local speed = get_speed2d(velocity)
-            local airborne = not is_onground(player)
+            local velocity = helpers.get_velocity(player)
+            local speed = helpers.get_speed2d(velocity)
+            local airborne = not helpers.is_onground(player)
 
             if previous ~= nil and previous.origin ~= nil then
                 tick_delta = simulation_tick - previous.simulation_tick
@@ -12942,7 +13280,7 @@ function M.start(deps)
         end
     end
 
-    local function is_garbage_record(player)
+    function api.is_garbage(player)
         local record = records[player]
 
         if record == nil then
@@ -12954,11 +13292,38 @@ function M.start(deps)
             or record.garbage_until >= globals.tickcount()
     end
 
-    local function get_active_hitboxes()
+    function api.reset()
+        records = {}
+    end
+
+    return api
+end
+
+return M
+]],
+    ["pasthetic/rage_ai_peek_scanner"] = [[local M = {}
+
+function M.new(deps)
+    deps = deps or {}
+
+    local ui = assert(deps.ui, 'rage_ai_peek_scanner: ui dependency is required')
+    local entity = assert(deps.entity, 'rage_ai_peek_scanner: entity dependency is required')
+    local client = assert(deps.client, 'rage_ai_peek_scanner: client dependency is required')
+    local vector = assert(deps.vector, 'rage_ai_peek_scanner: vector dependency is required')
+    local ref = assert(deps.ref, 'rage_ai_peek_scanner: ref dependency is required')
+    local helpers = assert(deps.helpers, 'rage_ai_peek_scanner: helpers dependency is required')
+    local records = assert(deps.records, 'rage_ai_peek_scanner: records dependency is required')
+    local constants = assert(deps.constants, 'rage_ai_peek_scanner: constants dependency is required')
+    local rage_min_damage = assert(deps.rage_min_damage, 'rage_ai_peek_scanner: rage_min_damage dependency is required')
+    local rage_damage_override = assert(deps.rage_damage_override, 'rage_ai_peek_scanner: rage_damage_override dependency is required')
+
+    local api = {}
+
+    function api.get_active_hitboxes()
         local active = {}
 
-        for i = 1, #hitbox_names do
-            local name = hitbox_names[i]
+        for i = 1, #constants.hitbox_names do
+            local name = constants.hitbox_names[i]
 
             if ref.hitboxes:get(name) then
                 active[i - 1] = name
@@ -12973,7 +13338,7 @@ function M.start(deps)
         return active
     end
 
-    local function get_targets(exclude)
+    function api.get_targets(exclude)
         local players = {}
 
         if ref.scan_all:get() or exclude then
@@ -13009,7 +13374,7 @@ function M.start(deps)
         return players
     end
 
-    local function get_threats()
+    function api.get_threats()
         local players = {}
         local list = entity.get_players(true)
 
@@ -13024,7 +13389,7 @@ function M.start(deps)
         return players
     end
 
-    local function get_local_damage_points_at(pos)
+    function api.get_local_damage_points_at(pos)
         return {
             pos + vector(0, 0, 64),
             pos + vector(0, 0, 54),
@@ -13033,16 +13398,16 @@ function M.start(deps)
         }
     end
 
-    local function evaluate_position_safety(me, pos)
+    function api.evaluate_position_safety(me, pos)
         local max_damage = 0
         local exposure_count = 0
         local bad_record_exposure = 0
-        local threats = get_threats()
-        local local_points = get_local_damage_points_at(pos)
+        local threats = api.get_threats()
+        local local_points = api.get_local_damage_points_at(pos)
 
         for i = 1, #threats do
             local threat = threats[i]
-            local eye = get_eye_position(threat)
+            local eye = helpers.get_eye_position(threat)
             local threat_damage = 0
 
             if eye ~= nil then
@@ -13065,7 +13430,7 @@ function M.start(deps)
                 exposure_count = exposure_count + 1
                 max_damage = math.max(max_damage, threat_damage)
 
-                if is_garbage_record(threat) then
+                if records.is_garbage(threat) then
                     bad_record_exposure = bad_record_exposure + 1
                 end
             end
@@ -13078,20 +13443,20 @@ function M.start(deps)
         }
     end
 
-    local function is_position_hittable(safety)
+    function api.is_position_hittable(safety)
         return safety ~= nil
-            and ((safety.incoming_damage or 0) > COMMIT_EXPOSURE_DAMAGE
+            and ((safety.incoming_damage or 0) > constants.COMMIT_EXPOSURE_DAMAGE
                 or (safety.exposure_count or 0) > 0)
     end
 
-    local function is_full_safe(safety)
+    function api.is_full_safe(safety)
         return safety ~= nil
             and (safety.incoming_damage or 0) <= 0
             and (safety.exposure_count or 0) <= 0
             and (safety.bad_record_exposure or 0) <= 0
     end
 
-    local function is_commit_candidate_safe(candidate, current_safety)
+    function api.is_commit_candidate_safe(candidate, current_safety)
         if candidate == nil or candidate.start == nil then
             return false
         end
@@ -13107,557 +13472,105 @@ function M.start(deps)
             return false
         end
 
-        if (candidate.incoming_damage or 0) > math.max(COMMIT_EXPOSURE_DAMAGE, current_damage + 5) then
+        if (candidate.incoming_damage or 0) > math.max(constants.COMMIT_EXPOSURE_DAMAGE, current_damage + 5) then
             return false
         end
 
         return true
     end
 
-    local function clear_commit()
-        if aipeek.data ~= nil then
-            aipeek.data.commit = nil
-        end
-    end
-
-    local function set_target_selection_override()
-        if aipeek.data == nil or ref_target_selection == nil then
-            return
-        end
-
-        if aipeek.data.target_selection_before == nil then
-            aipeek.data.target_selection_before = safe_get(ref_target_selection, nil)
-        end
-
-        pcall(ui.set, ref_target_selection, AI_PEEK_TARGET_SELECTION)
-    end
-
-    local function restore_target_selection()
-        if aipeek.data == nil or aipeek.data.target_selection_before == nil or ref_target_selection == nil then
-            return
-        end
-
-        pcall(ui.set, ref_target_selection, aipeek.data.target_selection_before)
-        aipeek.data.target_selection_before = nil
-    end
-
-    local function start_native_return()
-        if aipeek.data == nil then
-            return
-        end
-
-        aipeek.data.native_return = true
-        aipeek.data.safe_rescan_ticks = 0
-        clear_commit()
-        restore_target_selection()
-    end
-
-    local function move_to(cmd, pos)
-        local me = entity.get_local_player()
-
-        if me == nil or not entity.is_alive(me) or pos == nil then
-            return
-        end
-
-        local origin = get_origin(me)
-        local angles = vector(client.camera_angles())
-
-        if origin == nil or angles == nil then
-            return
-        end
-
-        local dx = origin.x - pos.x
-        local dy = origin.y - pos.y
-        local yaw = math.rad(angles.y)
-        local forward = clamp(-450, -20 * (dx * math.cos(yaw) + dy * math.sin(yaw)), 450)
-        local side = clamp(-450, 20 * (dy * math.cos(yaw) - dx * math.sin(yaw)), 450)
-
-        if forward and side then
-            cmd.forwardmove = forward
-            cmd.sidemove = side
-
-            cmd.in_forward = forward > 1 and 1 or 0
-            cmd.in_back = forward < -1 and 1 or 0
-            cmd.in_moveright = side > 1 and 1 or 0
-            cmd.in_moveleft = side < -1 and 1 or 0
-        end
-    end
-
-    local function ready_shot_local()
-        local me = entity.get_local_player()
-
-        if me == nil or not entity.is_alive(me) then
-            return false
-        end
-
-        local weapon_index = entity.get_player_weapon(me)
-        local weapon = weapons(weapon_index)
-
-        if weapon == nil or weapon.weapon_type_int == 0 or weapon.weapon_type_int == 9 then
-            return false
-        end
-
-        local next_attack = entity.get_prop(me, 'm_flNextAttack') or 0
-        local next_weapon_attack = entity.get_prop(weapon_index, 'm_flNextPrimaryAttack') or 0
-        local now = globals.curtime()
-
-        return next_attack <= now and next_weapon_attack <= now
-    end
-
-    local function get_min_damage()
+    function api.get_min_damage()
         if ref.min_damage_override:get() then
-            return safe_get(rage_damage_override[3], safe_get(rage_min_damage[1], 1))
+            return helpers.safe_get(rage_damage_override[3], helpers.safe_get(rage_min_damage[1], 1))
         end
 
-        return safe_get(rage_min_damage[1], 1)
+        return helpers.safe_get(rage_min_damage[1], 1)
     end
 
-    local function build_positions()
-        if aipeek.data == nil or aipeek.data.positions == nil then
+    function api.scan(data, me, origin)
+        if data == nil or data.positions == nil then
             return
         end
 
-        aipeek.data.positions.other = {}
-
-        local me = entity.get_local_player()
-        local previous = get_origin(me)
-
-        if previous == nil then
-            return
-        end
-
-        local previous_id = nil
-        local angles = vector(client.camera_angles())
-        local distance = ref.distance:get()
-        local count = ref.count:get()
-        local interval = distance / count
-        local separation = ref.separation:get()
-
-        for side = 1, separation do
-            for dist = interval, distance, interval do
-                local angle = math.rad(angles.y + 90 + (side - 1) * 360 / separation)
-                local x = aipeek.data.eye.x + dist * math.cos(angle)
-                local y = aipeek.data.eye.y + dist * math.sin(angle)
-                local lateral = trace.line(
-                    aipeek.data.eye,
-                    vector(x, y, aipeek.data.eye.z),
-                    { skip = entity.get_players() }
-                )
-                local lateral_end = get_trace_end(lateral)
-
-                if lateral_end == nil then
-                    goto continue
-                end
-
-                local down = trace.line(
-                    lateral_end,
-                    lateral_end - vector(0, 0, 96),
-                    { skip = entity.get_players() }
-                )
-                local down_end = get_trace_end(down)
-                local id = dist .. ':' .. side
-
-                if down_end ~= nil and lateral_end:dist2d(previous) > interval * 0.5 then
-                    if down_end.z - lateral_end.z ~= -96 then
-                        aipeek.data.positions.other[id] = {
-                            position = down_end,
-                            {
-                                hitbox = {},
-                                damage = 0
-                            },
-                            angle = angle
-                        }
-                    else
-                        local hull = trace.hull(
-                            lateral_end - vector(0, 0, 64),
-                            lateral_end - vector(0, 0, 128),
-                            vector(-16, -16, 0),
-                            vector(16, 16, 72),
-                            { skip = entity.get_players() }
-                        )
-                        local hull_end = get_trace_end(hull)
-
-                        if hull_end ~= nil and hull_end.z - lateral_end.z ~= -128 then
-                            aipeek.data.positions.other[id] = {
-                                position = hull_end,
-                                {
-                                    hitbox = {},
-                                    damage = 0
-                                },
-                                angle = angle
-                            }
-                        end
-                    end
-                elseif previous_id ~= nil and previous:dist2d(lateral_end) > interval * 0.25 and down_end ~= nil then
-                    aipeek.data.positions.other[previous_id] = {
-                        position = down_end,
-                        {
-                            hitbox = {},
-                            damage = 0
-                        },
-                        angle = angle
-                    }
-                end
-
-                previous_id = id
-                previous = lateral_end
-
-                ::continue::
-            end
-        end
-    end
-
-    local function reset()
-        restore_target_selection()
-        aipeek.data = nil
-        records = {}
-    end
-
-    local function is_active()
-        return ref.enabled:get()
-            and safe_get(ref_quick_peek[1], false) == true
-            and safe_get(ref_quick_peek[2], false) == true
-    end
-
-    local function update_data()
-        local bind_active = is_active()
-
-        if not bind_active then
-            reset()
-            return
-        end
-
-        local me = entity.get_local_player()
-
-        if me == nil or not entity.is_alive(me) then
-            reset()
-            return
-        end
-
-        if aipeek.data == nil then
-            aipeek.data = {}
-        end
-
-        if aipeek.data.stored == nil then
-            aipeek.data.stored = {}
-        end
-
-        if aipeek.data.stored.pos ~= true then
-            local position = get_origin(me)
-            local eye = make_vec(client.eye_position())
-
-            if position == nil or eye == nil then
-                return
-            end
-
-            aipeek.data.positions = {
-                center = position,
-                other = {}
+        for _, point in next, data.positions.other do
+            local total_damage = 0
+            point[1] = {
+                hitbox = {},
+                damage = 0
             }
-            aipeek.data.eye = eye
-        end
 
-        if aipeek.data.stored.ang ~= true then
-            build_positions()
-        end
+            local start = helpers.vector_copy(point.position) + vector(0, 0, 64)
+            local targets = api.get_targets()
+            local hitboxes = api.get_active_hitboxes()
+            local min_damage = api.get_min_damage()
+            local safety = nil
 
-        aipeek.data.stored = {
-            pos = true,
-            ang = true
-        }
+            for _, target in next, targets do
+                if records.is_garbage(target) then
+                    goto skip_target
+                end
 
-        if ref.live_scan:get() then
-            aipeek.data.stored.ang = false
-        end
-    end
+                local health = entity.get_prop(target, 'm_iHealth') or 0
 
-    local function on_setup_command(cmd)
-        local me = entity.get_local_player()
+                for hitbox_id in next, hitboxes do
+                    local velocity = helpers.get_velocity(target)
+                    local hitbox_pos = helpers.make_vec(entity.hitbox_position(target, hitbox_id))
 
-        if me == nil or not entity.is_alive(me) then
-            return
-        end
+                    if hitbox_pos ~= nil then
+                        local predicted = helpers.extrapolate(
+                            hitbox_pos,
+                            velocity,
+                            ref.prediction:get()
+                        )
+                        local hit_ent, damage = client.trace_bullet(
+                            me,
+                            start.x, start.y, start.z,
+                            predicted.x, predicted.y, predicted.z
+                        )
+                        local trace_damage = damage or 0
 
-        if aipeek.data == nil then
-            return
-        end
+                        if not hit_ent then
+                            point[1].damage = total_damage
+                        elseif target == hit_ent then
+                            point[1].damage = total_damage < trace_damage and trace_damage or total_damage
+                        end
 
-        aipeek.data.aim = {}
+                        total_damage = point[1].damage
 
-        local origin = get_origin(me)
-
-        if origin == nil or aipeek.data.positions == nil then
-            return
-        end
-
-        local is_move = cmd.in_forward == 1
-            or cmd.in_back == 1
-            or cmd.in_moveleft == 1
-            or cmd.in_moveright == 1
-
-        if cmd.in_attack == 1 or cmd.in_attack == true then
-            start_native_return()
-        end
-
-        local center_distance = origin:dist2d(aipeek.data.positions.center)
-        local tickcount = globals.tickcount()
-
-        if not aipeek.data.native_return and aipeek.data.commit == nil then
-            local reset_distance = math.max(ref.distance:get() * 2.25, MANUAL_RESET_DISTANCE_MIN)
-
-            if center_distance > reset_distance then
-                reset()
-                return
-            end
-        end
-
-        if aipeek.data.native_return then
-            local current_safety = evaluate_position_safety(me, origin)
-            local stable_speed = get_speed2d(get_velocity(me)) <= RETURN_RESUME_SPEED
-
-            if is_full_safe(current_safety) and stable_speed then
-                aipeek.data.safe_rescan_ticks = (aipeek.data.safe_rescan_ticks or 0) + 1
-            else
-                aipeek.data.safe_rescan_ticks = 0
-            end
-
-            if (aipeek.data.safe_rescan_ticks or 0) >= SAFE_RESCAN_TICKS then
-                aipeek.data.native_return = false
-                aipeek.data.safe_rescan_ticks = 0
-                clear_commit()
-                restore_target_selection()
-            end
-
-            return
-        end
-
-        local active_commit = aipeek.data.commit
-
-        if active_commit ~= nil and active_commit.until_tick < tickcount then
-            if center_distance > COMMIT_DISTANCE then
-                start_native_return()
-                return
-            end
-
-            clear_commit()
-        end
-
-        if not ready_shot_local() then
-            aipeek.data.safe_rescan_ticks = 0
-
-            if center_distance > COMMIT_DISTANCE then
-                start_native_return()
-                return
-            end
-
-            clear_commit()
-            return
-        end
-
-        if not aipeek.data.native_return then
-            set_target_selection_override()
-
-            for _, point in next, aipeek.data.positions.other do
-                local total_damage = 0
-                point[1] = {
-                    hitbox = {},
-                    damage = 0
-                }
-
-                local start = vector_copy(point.position) + vector(0, 0, 64)
-                local targets = get_targets()
-                local hitboxes = get_active_hitboxes()
-                local min_damage = get_min_damage()
-                local safety = nil
-
-                for _, target in next, targets do
-                    if is_garbage_record(target) then
-                        goto skip_target
-                    end
-
-                    local health = entity.get_prop(target, 'm_iHealth') or 0
-
-                    for hitbox_id in next, hitboxes do
-                        local velocity = get_velocity(target)
-                        local hitbox_pos = make_vec(entity.hitbox_position(target, hitbox_id))
-
-                        if hitbox_pos ~= nil then
-                            local predicted = extrapolate(
-                                hitbox_pos,
-                                velocity,
-                                ref.prediction:get()
-                            )
-                            local hit_ent, damage = client.trace_bullet(
-                                me,
-                                start.x, start.y, start.z,
-                                predicted.x, predicted.y, predicted.z
-                            )
-                            local trace_damage = damage or 0
-
-                            if not hit_ent then
-                                point[1].damage = total_damage
-                            elseif target == hit_ent then
-                                point[1].damage = total_damage < trace_damage and trace_damage or total_damage
+                        if (hit_ent == nil or target == hit_ent)
+                            and (trace_damage >= min_damage or health <= trace_damage)
+                        then
+                            if safety == nil then
+                                safety = api.evaluate_position_safety(me, point.position)
                             end
 
-                            total_damage = point[1].damage
+                            local target_origin = helpers.get_origin(target)
 
-                            if (hit_ent == nil or target == hit_ent)
-                                and (trace_damage >= min_damage or health <= trace_damage)
-                            then
-                                if safety == nil then
-                                    safety = evaluate_position_safety(me, point.position)
-                                end
-
-                                local target_origin = get_origin(target)
-
-                                if target_origin ~= nil then
-                                    aipeek.data.aim[#aipeek.data.aim + 1] = {
-                                        start = start,
-                                        ['end'] = target_origin,
-                                        damage = trace_damage,
-                                        lethal = health <= trace_damage,
-                                        move_distance = origin:dist2d(point.position),
-                                        target_distance = start:dist(target_origin),
-                                        incoming_damage = safety.incoming_damage,
-                                        exposure_count = safety.exposure_count,
-                                        bad_record_exposure = safety.bad_record_exposure
-                                    }
-                                end
-
-                                point[1].hitbox[hitbox_id] = predicted
+                            if target_origin ~= nil then
+                                data.aim[#data.aim + 1] = {
+                                    start = start,
+                                    ['end'] = target_origin,
+                                    damage = trace_damage,
+                                    lethal = health <= trace_damage,
+                                    move_distance = origin:dist2d(point.position),
+                                    target_distance = start:dist(target_origin),
+                                    incoming_damage = safety.incoming_damage,
+                                    exposure_count = safety.exposure_count,
+                                    bad_record_exposure = safety.bad_record_exposure
+                                }
                             end
+
+                            point[1].hitbox[hitbox_id] = predicted
                         end
                     end
-
-                    ::skip_target::
                 end
-            end
-        end
 
-        table.sort(aipeek.data.aim, function(a, b)
-            if a.bad_record_exposure ~= b.bad_record_exposure then
-                return (a.bad_record_exposure or 0) < (b.bad_record_exposure or 0)
-            end
-
-            if a.exposure_count ~= b.exposure_count then
-                return (a.exposure_count or 0) < (b.exposure_count or 0)
-            end
-
-            if a.incoming_damage ~= b.incoming_damage then
-                return (a.incoming_damage or 0) < (b.incoming_damage or 0)
-            end
-
-            if a.lethal ~= b.lethal then
-                return a.lethal == true
-            end
-
-            if a.move_distance ~= b.move_distance then
-                return (a.move_distance or 0) < (b.move_distance or 0)
-            end
-
-            if a.damage ~= b.damage then
-                return (a.damage or 0) > (b.damage or 0)
-            end
-
-            return (a.target_distance or a.start:dist(a['end'])) < (b.target_distance or b.start:dist(b['end']))
-        end)
-
-        local move_to_pos = nil
-        local best_aim = aipeek.data.aim[1]
-
-        if not aipeek.data.native_return then
-            local current_safety = center_distance > COMMIT_DISTANCE
-                and evaluate_position_safety(me, origin)
-                or nil
-            local commit_point = is_position_hittable(current_safety)
-
-            if commit_point then
-                local commit = aipeek.data.commit
-
-                if commit ~= nil and commit.until_tick >= tickcount then
-                    move_to_pos = commit.position
-                elseif is_commit_candidate_safe(best_aim, current_safety) then
-                    aipeek.data.commit = {
-                        position = vector_copy(best_aim.start),
-                        until_tick = tickcount + COMMIT_LOCK_TICKS
-                    }
-                    move_to_pos = best_aim.start
-                else
-                    start_native_return()
-                end
-            elseif best_aim ~= nil and best_aim.start ~= nil then
-                clear_commit()
-                move_to_pos = best_aim.start
-            else
-                clear_commit()
-            end
-        else
-            clear_commit()
-        end
-
-        if move_to_pos ~= nil and not is_move then
-            move_to(cmd, move_to_pos)
-        end
-    end
-
-    local function draw_circle(pos, radius, r, g, b, a)
-        if renderer == nil or pos == nil then
-            return
-        end
-
-        local old_x, old_y = nil, nil
-
-        for rot = 0, 360, 12 do
-            local rad = math.rad(rot)
-            local x, y = renderer.world_to_screen(
-                pos.x + radius * math.cos(rad),
-                pos.y + radius * math.sin(rad),
-                pos.z
-            )
-
-            if x ~= nil and old_x ~= nil then
-                renderer.line(x, y, old_x, old_y, r, g, b, a)
-            end
-
-            old_x, old_y = x, y
-        end
-    end
-
-    local function on_paint()
-        if aipeek.data == nil or aipeek.data.positions == nil or not ref.debug:get() then
-            return
-        end
-
-        for _, point in next, aipeek.data.positions.other do
-            local damage = point[1] ~= nil and point[1].damage or 0
-
-            if damage > 0 then
-                draw_circle(point.position, 12, 90, 220, 115, 200)
-            else
-                draw_circle(point.position, 12, 235, 235, 235, 140)
+                ::skip_target::
             end
         end
     end
 
-    local function on_aim_fire()
-        if aipeek.data ~= nil then
-            start_native_return()
-        end
-    end
-
-    utils.event_callback('shutdown', reset, true)
-    utils.event_callback('round_start', reset, true)
-    utils.event_callback('level_init', reset, true)
-    utils.event_callback('net_update_end', update_records, true)
-    utils.event_callback('run_command', update_data, true)
-    utils.event_callback('setup_command', on_setup_command, true)
-    utils.event_callback('paint', on_paint, true)
-    utils.event_callback('aim_fire', on_aim_fire, true)
-end
-
-function M.health()
-    return true
+    return api
 end
 
 return M
@@ -15431,7 +15344,7 @@ function M.start(deps)
     local logging = assert(deps.logging, 'resource_builder: logging dependency is required')
     local ui_debug = deps.ui_debug
     local color = assert(deps.color, 'resource_builder: color dependency is required')
-    local bundled_dormant_resource = deps.bundled_dormant_resource
+    local dormant_resource = deps.dormant_resource
     local contains = assert(deps.contains, 'resource_builder: contains dependency is required')
     local unpack = deps.unpack or unpack
 
@@ -16528,8 +16441,8 @@ local resource do
 
         resource.main = main
 
-        if bundled_dormant_resource ~= nil then
-            resource.main.dormant = bundled_dormant_resource
+        if dormant_resource ~= nil then
+            resource.main.dormant = dormant_resource
         end
     end
 
@@ -19046,7 +18959,10 @@ function M.start(ctx)
                 vector = vector,
                 renderer = renderer,
                 exploit = exploit,
-                utils = utils
+                utils = utils,
+                csgo_weapons = csgo_weapons,
+                bit = bit,
+                require_module = require_pasthetic_module
             })
             end)
         end
@@ -23929,8 +23845,8 @@ local pasthetic_external_config_ref = require_pasthetic_module 'pasthetic/extern
 local pasthetic_diagnostics = require_pasthetic_module 'pasthetic/diagnostics'
 local pasthetic_resource_builder = require_pasthetic_module 'pasthetic/resource_builder'
 local pasthetic_config_controller = require_pasthetic_module 'pasthetic/config_controller'
-local pasthetic_bundle_patches = require_pasthetic_module 'pasthetic/bundle_patches'
-local pasthetic_bundle_loader = require_pasthetic_module 'pasthetic/bundle_loader'
+local pasthetic_colorskinscsgo = require_pasthetic_module 'pasthetic/colorskinscsgo'
+local pasthetic_dormant = require_pasthetic_module 'pasthetic/dormant'
 local pasthetic_runtime_modules = require_pasthetic_module 'pasthetic/runtime_modules'
 
 local contains = core.contains
@@ -23939,15 +23855,23 @@ local script = core.new_script({
     user_name = _USER_NAME
 })
 
-local bundle_loader_deps = {
-    client = client,
-    readfile = readfile,
-    loadstring = loadstring,
-    local_path = local_path,
-    patches = pasthetic_bundle_patches
-}
+local function start_optional_module(label, module, ...)
+    if module == nil or type(module.start) ~= 'function' then
+        return nil
+    end
 
-pasthetic_bundle_loader.load(bundle_loader_deps, 'colorskinscsgo.lua')
+    local ok, result = pcall(module.start, ...)
+
+    if not ok then
+        client.color_log(250, 50, 75, '[Pasthetic] \0')
+        client.color_log(255, 255, 255, 'failed to start ' .. label .. ': ' .. tostring(result))
+        return nil
+    end
+
+    return result
+end
+
+start_optional_module('colorskinscsgo', pasthetic_colorskinscsgo)
 
 local color = core.new_color({
     ffi = ffi
@@ -24034,21 +23958,21 @@ local menu_logic = pasthetic_menu_logic.new({
     logging = logging
 })
 
-local bundled_dormant_resource = nil
+local dormant_resource = nil
 
 local function wrap_external_config_ref(ref, on_fire)
     return pasthetic_external_config_ref.wrap({ ui = ui }, ref, on_fire)
 end
 
-local bundled_dormant_loaded = pasthetic_bundle_loader.load(bundle_loader_deps, 'dormant.lua')
+local dormant_api = start_optional_module('dormant', pasthetic_dormant)
 
-if bundled_dormant_loaded then
-    bundled_dormant_resource = pasthetic_external_config_ref.register_bundled_dormant({
+if dormant_api ~= nil then
+    dormant_resource = pasthetic_external_config_ref.register_dormant({
         ui = ui,
         config_system = config_system,
         menu_logic = menu_logic,
         menu = menu,
-        globals_table = _G
+        dormant_api = dormant_api
     })
 end
 
@@ -24098,7 +24022,7 @@ local resource = diagnostics:start('resource_builder', function()
         utils = utils,
         logging = logging,
         color = color,
-        bundled_dormant_resource = bundled_dormant_resource,
+        dormant_resource = dormant_resource,
         contains = contains,
         unpack = unpack
     })

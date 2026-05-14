@@ -1,3 +1,12 @@
+local M = {}
+local started = false
+
+function M.start()
+    if started then
+        return rawget(_G, 'pasthetic_colorskins')
+    end
+
+    started = true
 local ffi = require("ffi")
 
 local DB_KEY = "colorskinscsgo_skin_color_config_v1"
@@ -916,3 +925,8 @@ end)
 
 
 
+
+    return rawget(_G, 'pasthetic_colorskins')
+end
+
+return M

@@ -224,7 +224,10 @@ function M.start(ctx)
                 vector = vector,
                 renderer = renderer,
                 exploit = exploit,
-                utils = utils
+                utils = utils,
+                csgo_weapons = csgo_weapons,
+                bit = bit,
+                require_module = require_pasthetic_module
             })
             end)
         end

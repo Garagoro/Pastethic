@@ -15,7 +15,7 @@ function M.start(deps)
     local logging = assert(deps.logging, 'resource_builder: logging dependency is required')
     local ui_debug = deps.ui_debug
     local color = assert(deps.color, 'resource_builder: color dependency is required')
-    local bundled_dormant_resource = deps.bundled_dormant_resource
+    local dormant_resource = deps.dormant_resource
     local contains = assert(deps.contains, 'resource_builder: contains dependency is required')
     local unpack = deps.unpack or unpack
 
@@ -1112,8 +1112,8 @@ local resource do
 
         resource.main = main
 
-        if bundled_dormant_resource ~= nil then
-            resource.main.dormant = bundled_dormant_resource
+        if dormant_resource ~= nil then
+            resource.main.dormant = dormant_resource
         end
     end
 

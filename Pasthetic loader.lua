@@ -528,8 +528,8 @@ local pasthetic_external_config_ref = require_pasthetic_module 'pasthetic/extern
 local pasthetic_diagnostics = require_pasthetic_module 'pasthetic/diagnostics'
 local pasthetic_resource_builder = require_pasthetic_module 'pasthetic/resource_builder'
 local pasthetic_config_controller = require_pasthetic_module 'pasthetic/config_controller'
-local pasthetic_bundle_patches = require_pasthetic_module 'pasthetic/bundle_patches'
-local pasthetic_bundle_loader = require_pasthetic_module 'pasthetic/bundle_loader'
+local pasthetic_colorskinscsgo = require_pasthetic_module 'pasthetic/colorskinscsgo'
+local pasthetic_dormant = require_pasthetic_module 'pasthetic/dormant'
 local pasthetic_runtime_modules = require_pasthetic_module 'pasthetic/runtime_modules'
 
 local contains = core.contains
@@ -538,15 +538,23 @@ local script = core.new_script({
     user_name = _USER_NAME
 })
 
-local bundle_loader_deps = {
-    client = client,
-    readfile = readfile,
-    loadstring = loadstring,
-    local_path = local_path,
-    patches = pasthetic_bundle_patches
-}
+local function start_optional_module(label, module, ...)
+    if module == nil or type(module.start) ~= 'function' then
+        return nil
+    end
 
-pasthetic_bundle_loader.load(bundle_loader_deps, 'colorskinscsgo.lua')
+    local ok, result = pcall(module.start, ...)
+
+    if not ok then
+        client.color_log(250, 50, 75, '[Pasthetic] \0')
+        client.color_log(255, 255, 255, 'failed to start ' .. label .. ': ' .. tostring(result))
+        return nil
+    end
+
+    return result
+end
+
+start_optional_module('colorskinscsgo', pasthetic_colorskinscsgo)
 
 local color = core.new_color({
     ffi = ffi
@@ -633,21 +641,21 @@ local menu_logic = pasthetic_menu_logic.new({
     logging = logging
 })
 
-local bundled_dormant_resource = nil
+local dormant_resource = nil
 
 local function wrap_external_config_ref(ref, on_fire)
     return pasthetic_external_config_ref.wrap({ ui = ui }, ref, on_fire)
 end
 
-local bundled_dormant_loaded = pasthetic_bundle_loader.load(bundle_loader_deps, 'dormant.lua')
+local dormant_api = start_optional_module('dormant', pasthetic_dormant)
 
-if bundled_dormant_loaded then
-    bundled_dormant_resource = pasthetic_external_config_ref.register_bundled_dormant({
+if dormant_api ~= nil then
+    dormant_resource = pasthetic_external_config_ref.register_dormant({
         ui = ui,
         config_system = config_system,
         menu_logic = menu_logic,
         menu = menu,
-        globals_table = _G
+        dormant_api = dormant_api
     })
 end
 
@@ -697,7 +705,7 @@ local resource = diagnostics:start('resource_builder', function()
         utils = utils,
         logging = logging,
         color = color,
-        bundled_dormant_resource = bundled_dormant_resource,
+        dormant_resource = dormant_resource,
         contains = contains,
         unpack = unpack
     })
