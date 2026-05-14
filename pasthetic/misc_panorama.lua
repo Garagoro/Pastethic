@@ -634,7 +634,29 @@ function M.start(deps)
             }
         };
 
-        var _CloseTargetInfoPopups = function() {
+        var _HasTargetInfoPopup = function() {
+            var root = null;
+
+            try {
+                root = $.GetContextPanel();
+            } catch (e) {
+                return false;
+            }
+
+            if (!_IsValid(root)) {
+                return false;
+            }
+
+            var text = _PanelTreeText(root, 0);
+            return _TextHasAny(text, LEGACY_TEXT_MATCHES)
+                || _TextHasAny(text, INSECURE_TEXT_MATCHES);
+        };
+
+        var _CloseTargetInfoPopups = function(allowPopupClose) {
+            if (!allowPopupClose || !_HasTargetInfoPopup()) {
+                return false;
+            }
+
             if (_ShouldCloseInsecurePopup()) {
                 insecure_popup_close_at = Date.now() + POPUP_CLOSE_COOLDOWN_MS;
                 try { UiToolkitAPI.CloseAllVisiblePopups(); } catch (e) {}
@@ -678,10 +700,18 @@ function M.start(deps)
             }
 
             var text = _PanelText(panel);
-            var count = panel.GetChildCount ? panel.GetChildCount() : 0;
+            var count = 0;
+
+            try {
+                count = panel.GetChildCount ? panel.GetChildCount() : 0;
+            } catch (e) {
+                return text;
+            }
 
             for (var i = 0; i < count; i++) {
-                text += ' ' + _PanelTreeText(panel.GetChild(i), depth + 1);
+                try {
+                    text += ' ' + _PanelTreeText(panel.GetChild(i), depth + 1);
+                } catch (e) {}
             }
 
             return text;
@@ -735,15 +765,36 @@ function M.start(deps)
                 return;
             }
 
-            var count = panel.GetChildCount ? panel.GetChildCount() : 0;
+            var count = 0;
+
+            try {
+                count = panel.GetChildCount ? panel.GetChildCount() : 0;
+            } catch (e) {
+                return;
+            }
+
             for (var i = 0; i < count; i++) {
-                _Scan(panel.GetChild(i));
+                try {
+                    _Scan(panel.GetChild(i));
+                } catch (e) {}
             }
         };
 
-        var _Hide = function() {
-            _CloseTargetInfoPopups();
-            _Scan($.GetContextPanel());
+        var _Hide = function(allowPopupClose) {
+            var root = null;
+
+            try {
+                root = $.GetContextPanel();
+            } catch (e) {
+                return;
+            }
+
+            if (!_IsValid(root)) {
+                return;
+            }
+
+            _CloseTargetInfoPopups(allowPopupClose === true);
+            _Scan(root);
         };
 
         var _Show = function() {
@@ -809,7 +860,7 @@ function M.start(deps)
 
         if on_server then
             if vac_enabled then
-                remove_vac_panel.hide()
+                remove_vac_panel.hide(false)
             elseif state.vac then
                 remove_vac_panel.show()
             end
@@ -917,7 +968,7 @@ function M.start(deps)
         end
 
         if settings.vac then
-            remove_vac_panel.hide()
+            remove_vac_panel.hide(true)
         elseif state.vac then
             remove_vac_panel.show()
         end
