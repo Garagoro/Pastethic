@@ -5657,6 +5657,7 @@ return M
 local DB_KEY = "colorskinscsgo_skin_color_config_v1"
 local CONFIG_FILE = "colorskinscsgo_config.json"
 local SKIN_SELECTION_PREFIX = "__skin_selection:"
+local PAINTKIT_COLOR_PREFIX = "__paintkit_color:"
 
 local read = function(typename, address)
     if address == nil then
@@ -6002,6 +6003,8 @@ init()
 
 local get_skin_key
 local get_weapon_team_key
+local get_paintkit_color_key
+local save_active_config
 
 local ensure_skinchanger_enabled = function()
     if not ui.get(ctx.refs.skins_enabled) then
@@ -6060,6 +6063,24 @@ local apply_color_table = function(paintkit, colors)
     return true
 end
 
+local colors_match_original = function(paintkit, colors)
+    local original = ctx.o_pk_colors[ paintkit ]
+    colors = normalize_color_table(colors)
+    if original == nil or colors == nil then return false end
+
+    for layer = 1, 4 do
+        local color = colors[ layer ]
+        local source = original[ layer - 1 ]
+        for channel = 1, 4 do
+            if color[ channel ] ~= source[ channel - 1 ] then
+                return false
+            end
+        end
+    end
+
+    return true
+end
+
 
 local get_current_weapon_id = function()
     local player = entity.get_local_player()
@@ -6087,14 +6108,15 @@ get_skin_key = function()
 
     if weapon_id == nil or paintkit == nil then return nil, paintkit end
 
+    local color_key = get_paintkit_color_key(paintkit)
     local legacy_key = tostring(weapon_id) .. ";" .. tostring(paintkit)
     local team = get_current_team()
 
     if team == nil then
-        return legacy_key, paintkit, weapon_id, nil, legacy_key
+        return color_key, paintkit, weapon_id, nil, legacy_key
     end
 
-    return tostring(team) .. ";" .. legacy_key, paintkit, weapon_id, team, legacy_key
+    return color_key, paintkit, weapon_id, team, legacy_key, tostring(team) .. ";" .. legacy_key
 end
 
 get_weapon_team_key = function()
@@ -6108,6 +6130,13 @@ get_weapon_team_key = function()
     end
 
     return tostring(team) .. ";" .. legacy_key, legacy_key
+end
+
+get_paintkit_color_key = function(paintkit)
+    paintkit = tonumber(paintkit)
+    if paintkit == nil then return nil end
+
+    return PAINTKIT_COLOR_PREFIX .. tostring(paintkit)
 end
 
 local get_weapon_held_time = function()
@@ -6147,7 +6176,7 @@ local save_skin_for_current_weapon = function(paintkit)
     if team_weapon_key == nil or paintkit == nil then return false end
 
     ctx.skin_color_config[ get_skin_selection_key(team_weapon_key) ] = paintkit
-    save_config(ctx.skin_color_config)
+    save_active_config()
 
     return true
 end
@@ -6196,19 +6225,69 @@ clone_config_table = function(source)
     if type(source) ~= "table" then return {} end
 
     local result = {}
+    local active_paintkits = {}
+    local selections = {}
+
     for key, value in pairs(source) do
+        key = tostring(key)
+
+        if type(value) == "number" and string.sub(key, 1, #SKIN_SELECTION_PREFIX) == SKIN_SELECTION_PREFIX then
+            local paintkit = tonumber(value)
+            if paintkit ~= nil then
+                result[key] = paintkit
+                selections[string.sub(key, #SKIN_SELECTION_PREFIX + 1)] = paintkit
+                active_paintkits[paintkit] = true
+            end
+        end
+    end
+
+    for key, value in pairs(source) do
+        key = tostring(key)
+
         if type(value) == "table" then
             local colors = normalize_color_table(value)
             if colors ~= nil then
-                result[key] = colors
+                local paintkit = tonumber(string.match(key, "^" .. PAINTKIT_COLOR_PREFIX .. "(%d+)$"))
+
+                if paintkit ~= nil then
+                    if active_paintkits[paintkit] then
+                        result[get_paintkit_color_key(paintkit)] = colors
+                    end
+                else
+                    local team, weapon_id, legacy_paintkit = string.match(key, "^(%d+);(%d+);(%d+)$")
+                    if team ~= nil and weapon_id ~= nil and legacy_paintkit ~= nil then
+                        local selected = selections[tostring(team) .. ";" .. tostring(weapon_id)]
+                        paintkit = tonumber(legacy_paintkit)
+
+                        if selected == paintkit and result[get_paintkit_color_key(paintkit)] == nil then
+                            result[get_paintkit_color_key(paintkit)] = colors
+                        end
+                    else
+                        local legacy_weapon_id
+                        legacy_weapon_id, legacy_paintkit = string.match(key, "^(%d+);(%d+)$")
+                        paintkit = tonumber(legacy_paintkit)
+
+                        if paintkit ~= nil and selections[legacy_weapon_id] == paintkit and result[get_paintkit_color_key(paintkit)] == nil then
+                            result[get_paintkit_color_key(paintkit)] = colors
+                        end
+                    end
+                end
             end
-        elseif type(value) == "number" and string.sub(tostring(key), 1, #SKIN_SELECTION_PREFIX) == SKIN_SELECTION_PREFIX then
-            result[key] = value
         end
     end
 
     return result
 end
+
+save_active_config = function()
+    ctx.skin_color_config = clone_config_table(ctx.skin_color_config)
+    skin_color_config = ctx.skin_color_config
+    save_config(ctx.skin_color_config)
+end
+
+ctx.skin_color_config = clone_config_table(ctx.skin_color_config)
+skin_color_config = ctx.skin_color_config
+save_config(ctx.skin_color_config)
 
 notify_config_change = function()
     local snapshot = clone_config_table(ctx.skin_color_config)
@@ -6223,29 +6302,53 @@ local import_config_table = function(data)
     ctx.skin_color_config = skin_color_config
     ctx.applied_skins = {}
     ctx.paintkit_owner = {}
-    save_config(ctx.skin_color_config)
+    save_active_config()
     client.delay_call(0.8, apply_saved_skin_and_rebuild)
 end
 
 local save_colors_for_current_skin = function(colors)
-    local key = get_skin_key()
+    local key, paintkit = get_skin_key()
     colors = normalize_color_table(colors)
 
     if key == nil or colors == nil then return false end
 
-    ctx.skin_color_config[ key ] = colors
-    save_config(ctx.skin_color_config)
+    local team_weapon_key = get_weapon_team_key()
+    if team_weapon_key ~= nil then
+        ctx.skin_color_config[ get_skin_selection_key(team_weapon_key) ] = paintkit
+    end
 
-    return true, key
+    local is_original = colors_match_original(paintkit, colors)
+
+    if is_original then
+        ctx.skin_color_config[ key ] = nil
+    else
+        ctx.skin_color_config[ key ] = colors
+    end
+
+    save_active_config()
+
+    return true, key, not is_original
 end
 
 apply_config_for_current_skin = function(should_force_update)
-    local key, paintkit, weapon_id, team, legacy_key = get_skin_key()
+    local key, paintkit, weapon_id, team, legacy_key, team_legacy_key = get_skin_key()
     if key == nil or paintkit == nil then return false end
 
     local colors = normalize_color_table(ctx.skin_color_config[ key ])
+    if colors == nil and team_legacy_key ~= nil and team_legacy_key ~= key then
+        colors = normalize_color_table(ctx.skin_color_config[ team_legacy_key ])
+        if colors ~= nil then
+            ctx.skin_color_config[ key ] = colors
+            save_active_config()
+        end
+    end
+
     if colors == nil and legacy_key ~= nil and legacy_key ~= key then
         colors = normalize_color_table(ctx.skin_color_config[ legacy_key ])
+        if colors ~= nil then
+            ctx.skin_color_config[ key ] = colors
+            save_active_config()
+        end
     end
 
     if colors == nil then return false, key, paintkit end
@@ -6294,10 +6397,10 @@ local color_cb = function()
     ctx.current_paintkit = ui.get(ctx.refs.skins_weapon_skin)
     set_paintkit_colors( ctx.current_paintkit )
 
-    local saved, key = save_colors_for_current_skin(get_menu_colors())
+    local saved, key, stored_color = save_colors_for_current_skin(get_menu_colors())
     if saved and key ~= nil then
-        ctx.applied_skins[ key ] = true
-        ctx.paintkit_owner[ ctx.current_paintkit ] = key
+        ctx.applied_skins[ key ] = stored_color == true
+        ctx.paintkit_owner[ ctx.current_paintkit ] = stored_color == true and key or nil
     end
 
     force_update()
@@ -6328,12 +6431,11 @@ local reset_color_cb = function()
     ctx.current_paintkit = ui.get(ctx.refs.skins_weapon_skin)
     reset_paintkit_colors( ctx.current_paintkit )
     set_paintkit_colors( ctx.current_paintkit )
-    save_colors_for_current_skin(get_menu_colors())
+    local saved, key, stored_color = save_colors_for_current_skin(get_menu_colors())
 
-    local key = get_skin_key()
-    if key ~= nil then
-        ctx.applied_skins[ key ] = true
-        ctx.paintkit_owner[ ctx.current_paintkit ] = key
+    if saved and key ~= nil then
+        ctx.applied_skins[ key ] = stored_color == true
+        ctx.paintkit_owner[ ctx.current_paintkit ] = stored_color == true and key or nil
     end
 
     force_update()
