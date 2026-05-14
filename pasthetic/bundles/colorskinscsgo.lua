@@ -850,11 +850,14 @@ client.set_event_callback("paint", function()
     ctx.last_weapon_ent = weapon
     ctx.last_weapon_team_key = team_weapon_key
 
-    apply_saved_skin_for_current_weapon()
+    local applied_skin = apply_saved_skin_for_current_weapon()
     key = get_skin_key()
     ctx.last_skin_key = key
     enable_current_skin_if_marked()
     apply_config_for_current_skin(false)
+    if applied_skin then
+        force_update()
+    end
     schedule_skin_refresh()
 end)
 
