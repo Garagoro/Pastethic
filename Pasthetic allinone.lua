@@ -6210,6 +6210,7 @@ local apply_saved_skin_for_current_weapon = function()
 end
 
 local apply_config_for_current_skin
+local set_menu_colors
 
 local apply_saved_skin_and_rebuild = function()
     local applied_skin = apply_saved_skin_for_current_weapon()
@@ -6419,7 +6420,7 @@ local set_paintkit_colors = function( paintkit )
     end
 end
 
-local set_menu_colors = function( obj )
+set_menu_colors = function( obj )
     if obj == nil then return end
 
     ctx.syncing_menu = true
