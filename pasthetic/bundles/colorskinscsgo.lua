@@ -408,6 +408,24 @@ local apply_color_table = function(paintkit, colors)
     return true
 end
 
+local restore_original_paintkit_colors = function(paintkit)
+    local paint_kit = ctx.paint_kits[ paintkit ]
+    local original = ctx.o_pk_colors[ paintkit ]
+    if paint_kit == nil or original == nil then return false end
+
+    for layer = 0, 3 do
+        ctx.set_paintkit_color(
+            paint_kit.color[ layer ],
+            original[ layer ][ 0 ],
+            original[ layer ][ 1 ],
+            original[ layer ][ 2 ],
+            original[ layer ][ 3 ]
+        )
+    end
+
+    return true
+end
+
 
 local get_current_weapon_id = function()
     local player = entity.get_local_player()
@@ -710,7 +728,20 @@ apply_config_for_current_skin = function(should_force_update)
         end
     end
 
-    if colors == nil then return false, key, paintkit end
+    if colors == nil then
+        local needs_rebuild = ctx.paintkit_owner[ paintkit ] ~= nil
+
+        set_menu_colors( ctx.o_pk_colors[ paintkit ] )
+        if restore_original_paintkit_colors(paintkit) then
+            ctx.paintkit_owner[ paintkit ] = nil
+        end
+
+        if should_force_update and needs_rebuild then
+            force_update()
+        end
+
+        return false, key, paintkit
+    end
 
     local needs_rebuild = ctx.paintkit_owner[ paintkit ] ~= key or ctx.applied_skins[ key ] ~= true
 
@@ -748,6 +779,7 @@ end
 
 local reset_paintkit_colors = function( paintkit )
     set_menu_colors( ctx.o_pk_colors[ paintkit ] )
+    restore_original_paintkit_colors(paintkit)
 end
 
 local color_cb = function()
