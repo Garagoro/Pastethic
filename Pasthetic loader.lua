@@ -370,6 +370,16 @@ local function get_base_urls(manifest)
     return list
 end
 
+local function cache_manifest(body)
+    if __pasthetic_allinone == true then
+        return
+    end
+
+    if writefile ~= nil and type(body) == 'string' then
+        pcall(writefile, MANIFEST_PATH, body)
+    end
+end
+
 local um_state = {
     busy            = false,
     update_available = false,
@@ -459,9 +469,7 @@ function update_manager.check(callback)
             end
         else
             um_success(__pasthetic_allinone == true and 'all-in-one up to date' or 'all files up to date')
-            if writefile ~= nil and type(body) == 'string' then
-                pcall(writefile, MANIFEST_PATH, body)
-            end
+            cache_manifest(body)
         end
 
         if callback ~= nil then callback(true) end
@@ -516,7 +524,7 @@ function update_manager.download(callback)
             um_state.pending = {}
             um_state.update_available = false
             if type(um_state.manifest_body) == 'string' then
-                pcall(writefile, MANIFEST_PATH, um_state.manifest_body)
+                cache_manifest(um_state.manifest_body)
             end
             um_success(
                 __pasthetic_allinone == true
