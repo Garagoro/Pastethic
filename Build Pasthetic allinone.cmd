@@ -15,6 +15,6 @@ if errorlevel 1 (
 
 echo.
 echo Done. Generated:
-echo %~dp0Pasthetic allinone.lua
+echo %~dp0Pasthetic_allinone.lua
 echo.
 pause

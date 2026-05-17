@@ -177,6 +177,16 @@ local function entry_path(path)
     return path:gsub('/', '\\')
 end
 
+local function url_path(path)
+    if type(path) ~= 'string' then return '' end
+
+    path = path:gsub('\\', '/')
+
+    return (path:gsub('([^%w%-%._~/])', function(char)
+        return ('%%%02X'):format(char:byte())
+    end))
+end
+
 local function should_skip_manifest_entry(entry)
     if type(entry) ~= 'table' then
         return true
@@ -188,7 +198,10 @@ local function should_skip_manifest_entry(entry)
     end
 
     path = path:gsub('\\', '/')
-    return path:match('/%.gitkeep$') ~= nil or (type(entry.size) == 'number' and entry.size == 0)
+    return path == 'Pasthetic allinone.lua'
+        or path == 'Pasthetic_allinone.lua'
+        or path:match('/%.gitkeep$') ~= nil
+        or (type(entry.size) == 'number' and entry.size == 0)
 end
 
 local function um_http_get(url, callback)
@@ -270,7 +283,9 @@ local function get_allinone_manifest_entry(manifest)
     if type(manifest.files) == 'table' then
         for i = 1, #manifest.files do
             local entry = manifest.files[i]
-            if type(entry) == 'table' and entry.path == 'Pasthetic allinone.lua' then
+            if type(entry) == 'table'
+                and (entry.path == 'Pasthetic_allinone.lua' or entry.path == 'Pasthetic allinone.lua')
+            then
                 return entry
             end
         end
@@ -527,9 +542,10 @@ function update_manager.download(callback)
                 local target_path = __pasthetic_allinone == true
                     and (__pasthetic_allinone_target_path or local_entry_path)
                     or local_path(local_entry_path)
+                local remote_path = url_path(entry.path)
                 local urls = {}
                 for j = 1, #base_urls do
-                    urls[#urls + 1] = base_urls[j] .. entry.path
+                    urls[#urls + 1] = base_urls[j] .. remote_path
                 end
                 local requested = um_http_get_first(urls, function(file_body)
                     if type(file_body) ~= 'string' then finish_one(false) return end
