@@ -340,6 +340,34 @@ local function decode_manifest(body)
     return decoded
 end
 
+local function compare_version_strings(left, right)
+    left = tostring(left or '')
+    right = tostring(right or '')
+
+    local left_parts, right_parts = {}, {}
+
+    for part in left:gmatch('%d+') do
+        left_parts[#left_parts + 1] = tonumber(part) or 0
+    end
+
+    for part in right:gmatch('%d+') do
+        right_parts[#right_parts + 1] = tonumber(part) or 0
+    end
+
+    local count = math.max(#left_parts, #right_parts)
+
+    for i = 1, count do
+        local a = left_parts[i] or 0
+        local b = right_parts[i] or 0
+
+        if a ~= b then
+            return a > b and 1 or -1
+        end
+    end
+
+    return 0
+end
+
 local function get_allinone_manifest_entry(manifest)
     if type(manifest) ~= 'table' then
         return nil
@@ -362,6 +390,71 @@ local function get_allinone_manifest_entry(manifest)
     end
 
     return nil
+end
+
+local function get_manifest_sort_version(manifest)
+    local entry = get_allinone_manifest_entry(manifest)
+
+    if type(entry) == 'table' and type(entry.version) == 'string' then
+        return entry.version
+    end
+
+    return tostring(manifest ~= nil and manifest.version or '')
+end
+
+local function um_http_get_best_manifest(callback)
+    local index = 1
+    local last_err = nil
+    local best_body, best_manifest, best_url
+
+    local function try_next()
+        local url = MANIFEST_URLS[index]
+
+        if url == nil then
+            if best_body ~= nil then
+                callback(best_body, nil, best_url)
+            else
+                callback(nil, last_err or 'all urls failed')
+            end
+
+            return
+        end
+
+        index = index + 1
+
+        local ok = um_http_get(url, function(body, err)
+            if type(body) == 'string' then
+                local manifest = decode_manifest(body)
+
+                if manifest ~= nil then
+                    if best_manifest == nil
+                        or compare_version_strings(
+                            get_manifest_sort_version(manifest),
+                            get_manifest_sort_version(best_manifest)
+                        ) > 0
+                    then
+                        best_body = body
+                        best_manifest = manifest
+                        best_url = url
+                    end
+                else
+                    last_err = err
+                end
+            else
+                last_err = err
+            end
+
+            try_next()
+        end)
+
+        if not ok then
+            last_err = 'gamesense/http unavailable'
+            try_next()
+        end
+    end
+
+    try_next()
+    return true
 end
 
 local function compare_allinone_manifest(manifest)
@@ -512,7 +605,7 @@ function update_manager.check(callback)
     um_state.busy = true
     um_log('checking updates...')
 
-    local started = um_http_get_first(MANIFEST_URLS, function(body, err)
+    local started = um_http_get_best_manifest(function(body, err)
         local manifest, decode_err = decode_manifest(body)
 
         if manifest == nil then
