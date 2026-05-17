@@ -876,7 +876,15 @@ pasthetic_runtime_modules.start({
 -- Auto-update: check on startup, show download button if needed
 -- ====================================================================
 
-local download_update_btn = ui.new_button(
+local download_update_btn
+
+local function hide_download_update_btn()
+    if download_update_btn ~= nil then
+        ui.set_visible(download_update_btn, false)
+    end
+end
+
+download_update_btn = ui.new_button(
     'CONFIG',
     'Lua',
     __pasthetic_allinone == true and 'Download latest all-in-one' or 'Download latest version',
@@ -884,19 +892,19 @@ local download_update_btn = ui.new_button(
     if um_state.busy then return end
     if update_manager.has_update() then
         update_manager.download(function(success)
-            if success then ui.set_visible(download_update_btn, false) end
+            if success then hide_download_update_btn() end
         end)
     else
         update_manager.check(function(ok)
             if ok and update_manager.has_update() then
                 update_manager.download(function(success)
-                    if success then ui.set_visible(download_update_btn, false) end
+                    if success then hide_download_update_btn() end
                 end)
             end
         end)
     end
 end)
-ui.set_visible(download_update_btn, false)
+hide_download_update_btn()
 
 update_manager.check(function(ok)
     if ok and update_manager.has_update() then
