@@ -187,6 +187,27 @@ local function url_path(path)
     end))
 end
 
+local function verify_file_body(path, expected_size, expected_checksum)
+    if readfile == nil or type(path) ~= 'string' then
+        return false
+    end
+
+    local ok, body = pcall(readfile, path)
+    if not ok or type(body) ~= 'string' then
+        return false
+    end
+
+    if type(expected_size) == 'number' and #body ~= expected_size then
+        return false
+    end
+
+    if type(expected_checksum) == 'string' and adler32(body) ~= expected_checksum then
+        return false
+    end
+
+    return true
+end
+
 local function should_skip_manifest_entry(entry)
     if type(entry) ~= 'table' then
         return true
@@ -380,7 +401,7 @@ local function reload_active_scripts_after_update()
     end
 
     if type(client.delay_call) == 'function' then
-        client.delay_call(0.15, reload)
+        client.delay_call(1.0, reload)
     else
         reload()
     end
@@ -582,7 +603,11 @@ function update_manager.download(callback)
                     if type(entry.size) == 'number' and #file_body ~= entry.size then finish_one(false) return end
                     if type(entry.checksum) == 'string' and adler32(file_body) ~= entry.checksum then finish_one(false) return end
                     create_parent_dirs(target_path)
-                    finish_one(writefile ~= nil and pcall(writefile, target_path, file_body))
+                    local ok_write = writefile ~= nil and pcall(writefile, target_path, file_body)
+                    if ok_write then
+                        ok_write = verify_file_body(target_path, entry.size, entry.checksum)
+                    end
+                    finish_one(ok_write)
                 end)
                 if not requested then finish_one(false) end
             end
