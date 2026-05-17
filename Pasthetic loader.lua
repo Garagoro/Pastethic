@@ -270,6 +270,7 @@ local function should_skip_manifest_entry(entry)
     path = path:gsub('\\', '/')
     return path == 'Pasthetic allinone.lua'
         or path == 'Pasthetic_allinone.lua'
+        or path == 'Pasthetic_allinone_bundle.lua'
         or path:match('/%.gitkeep$') ~= nil
         or (type(entry.size) == 'number' and entry.size == 0)
 end
@@ -1067,38 +1068,40 @@ pasthetic_runtime_modules.start({
 -- Auto-update: check on startup, show download button if needed
 -- ====================================================================
 
-local download_update_btn
+if __pasthetic_disable_allinone_update ~= true then
+    local download_update_btn
 
-local function hide_download_update_btn()
-    if download_update_btn ~= nil then
-        ui.set_visible(download_update_btn, false)
+    local function hide_download_update_btn()
+        if download_update_btn ~= nil then
+            ui.set_visible(download_update_btn, false)
+        end
     end
+
+    download_update_btn = ui.new_button(
+        'CONFIG',
+        'Lua',
+        __pasthetic_allinone == true and 'Download latest all-in-one' or 'Download latest version',
+        function()
+        if um_state.busy then return end
+        if update_manager.has_update() then
+            update_manager.download(function(success)
+                if success then hide_download_update_btn() end
+            end)
+        else
+            update_manager.check(function(ok)
+                if ok and update_manager.has_update() then
+                    update_manager.download(function(success)
+                        if success then hide_download_update_btn() end
+                    end)
+                end
+            end)
+        end
+    end)
+    hide_download_update_btn()
+
+    update_manager.check(function(ok)
+        if ok and update_manager.has_update() then
+            ui.set_visible(download_update_btn, true)
+        end
+    end)
 end
-
-download_update_btn = ui.new_button(
-    'CONFIG',
-    'Lua',
-    __pasthetic_allinone == true and 'Download latest all-in-one' or 'Download latest version',
-    function()
-    if um_state.busy then return end
-    if update_manager.has_update() then
-        update_manager.download(function(success)
-            if success then hide_download_update_btn() end
-        end)
-    else
-        update_manager.check(function(ok)
-            if ok and update_manager.has_update() then
-                update_manager.download(function(success)
-                    if success then hide_download_update_btn() end
-                end)
-            end
-        end)
-    end
-end)
-hide_download_update_btn()
-
-update_manager.check(function(ok)
-    if ok and update_manager.has_update() then
-        ui.set_visible(download_update_btn, true)
-    end
-end)
