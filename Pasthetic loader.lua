@@ -94,12 +94,12 @@ local csgo_weapons = require 'gamesense/csgo_weapons'
 -- ====================================================================
 
 local MANIFEST_URLS = {
+    'https://raw.githubusercontent.com/Garagoro/Pasthetic/main/manifest.json',
     'https://raw.githubusercontent.com/Garagoro/Pasthetic/refs/heads/main/manifest.json',
-    'https://cdn.jsdelivr.net/gh/Garagoro/Pasthetic@main/manifest.json',
 }
 local BASE_URLS = {
+    'https://raw.githubusercontent.com/Garagoro/Pasthetic/main/',
     'https://raw.githubusercontent.com/Garagoro/Pasthetic/refs/heads/main/',
-    'https://cdn.jsdelivr.net/gh/Garagoro/Pasthetic@main/',
 }
 local MANIFEST_PATH = local_path('manifest.json')
 
@@ -234,6 +234,7 @@ local function get_update_target_paths(local_entry_path)
     add_unique_path(paths, seen, target_name)
     add_unique_path(paths, seen, local_entry_path)
     add_unique_path(paths, seen, '.\\' .. local_entry_path)
+    add_unique_path(paths, seen, '..\\' .. local_entry_path)
     add_unique_path(paths, seen, 'pasthetic\\' .. local_entry_path)
 
     return paths
