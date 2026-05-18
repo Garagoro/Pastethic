@@ -17,6 +17,7 @@ local state = {
     busy = false,
     loaded = false
 }
+local request_serial = 0
 
 local function log(r, g, b, msg)
     if client ~= nil and client.color_log ~= nil then
@@ -71,6 +72,18 @@ local function url_path(path)
     return (path:gsub('([^%w%-%._~/])', function(char)
         return ('%%%02X'):format(char:byte())
     end))
+end
+
+local function uncached_url(url)
+    request_serial = request_serial + 1
+
+    local stamp = request_serial
+    if globals ~= nil and type(globals.realtime) == 'function' then
+        stamp = math.floor(globals.realtime() * 1000000)
+    end
+
+    local separator = url:find('?', 1, true) ~= nil and '&' or '?'
+    return url .. separator .. 'pasthetic=' .. tostring(stamp) .. '_' .. tostring(request_serial)
 end
 
 local function compare_versions(left, right)
@@ -291,10 +304,11 @@ local function fetch_best_manifest(callback)
 
         index = index + 1
 
-        local requested = http_get(url, function(body, error_text)
+        local requested = http_get(uncached_url(url), function(body, error_text)
             local manifest = decode_manifest(body)
+            local artifact = get_bundle_artifact(manifest)
 
-            if manifest ~= nil and get_bundle_artifact(manifest) ~= nil then
+            if manifest ~= nil and artifact ~= nil then
                 if best_manifest == nil
                     or compare_versions(get_manifest_version(manifest), get_manifest_version(best_manifest)) > 0
                 then
@@ -302,6 +316,8 @@ local function fetch_best_manifest(callback)
                     best_body = body
                     best_url = url
                 end
+            elseif manifest ~= nil then
+                last_error = 'manifest has no bundle artifact'
             else
                 last_error = error_text or 'invalid manifest'
             end
@@ -362,7 +378,7 @@ local function fetch_bundle(manifest, artifact)
 
         index = index + 1
 
-        local requested = http_get(base_url .. remote_path, function(body, error_text)
+        local requested = http_get(uncached_url(base_url .. remote_path), function(body, error_text)
             local valid, verify_error = verify_bundle(body, artifact)
 
             if valid then

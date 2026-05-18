@@ -3,7 +3,7 @@
 local __pasthetic_allinone = true
 local __pasthetic_bundle = true
 local __pasthetic_disable_allinone_update = true
-local __pasthetic_allinone_version = "2026.05.18-1"
+local __pasthetic_allinone_version = "2026.05.18-2"
 local __pasthetic_allinone_target_path = ".\\Pasthetic.bundle"
 local PASTHETIC_GIT_URL = 'https://github.com/Garagoro/Pasthetic'
 local function log_loader_reinstall_hint()
